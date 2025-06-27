@@ -64,83 +64,147 @@
 
 \subsection*{Topic}
 
-\todo{Add Motivation: Why is this topic relevant? Which ``big'' problem does it solve?}
-This Bachelor's Thesis shall implement a wide band scanning application
-resembling a spectrum analyzer using software defined radio hardware.
-It shall be possible to both sweep the whole spectrum supported by the hardware
-in use as well as tuning into specific parts of that spectrum.
-In addition it shall be possible to record a narrow band of the spectrum for
-both offline-analyses and replay at a later time.
-The intended field of application is, for instance, the generation of
-reproducible error signals in a testbed or empirically measuring the gain
-of different antennas.
+Blockchains are slow, expensive, and cannot scale to internet-scale applications. 
+In recent years, several "Layer 2" protocols have been built on top of existing 
+blockchain protocols to improve scalability and efficiency. However, these 
+solutions are centralized and suffer from worse latency (time to 
+finality)~\cite{arbitrum-sequencer-trustmodel, blockworks-sequencer-centralization}. 
+This situation calls for a new design. 
 
+Recent works such as Fastpay~\cite{fastpay}, ABC~\cite{abc}, and pod~\cite{pod} 
+relax the consensus requirements, to allow for peer-to-peer payments in just 1–2 network 
+without validator-to-validator communication. These systems are not generalised, 
+unlike modern blockchains, which allow for deploying arbitrary Turing-complete programs 
+(smart contracts). Smart contracts are essential to build and compose 
+applications, without the need of deploying a new network.
+
+To enable smart contract functionality, blockchain systems rely on consensus 
+protocols to globally order transactions. A node observing the network 
+can apply a deterministic state machine to the ordered sequence of 
+transactions to arrive at the same state—this is known as state machine 
+replication (SMR)~\cite{smr, vitalik, wood}. However, the above asynchronous protocols do not 
+provide this global ordering and thus cannot be easily extended to 
+support smart contracts.
+
+In this work, we propose leveraging conflict-free replicated 
+data types~\cite{crdt} (CRDTs) to build smart contract functionality for 
+asynchronous networks. The key insight is that operations on 
+CRDTs are commutative, allowing nodes to maintain a 
+consistent state without requiring global ordering of transactions.
+
+Concretely, we propose modifications to the Ethereum 
+Virtual Machine (EVM)~\cite{vitalik, wood}—the most widely 
+used smart contract VM—to enable composing these CRDT-like 
+primitives together. 
+Finally, we analyze these primitives and their composition in 
+the VM environment to prove their safety and liveness.
 \subsection*{Related Work}
 
-\todo{Explain here how this project compares to existing publications}
+Several efforts have been made
+to build protocols on top of existing blockchains to 
+improve efficiency and scalability, known as ``Layer 2" 
+solutions~\cite{optimism, zksync, polygon, arbitrum, arbitrum-paper}. 
+The prominent solution today depend on a special party called 
+a sequencer, which can censor or reorder transactions temporarily. Users must 
+still wait for their transactions to be posted on the blockchain for 
+security guarantees, resulting in similar or worse latency. 
+Additionally, the network's throughput is limited by the number of 
+transactions that can be processed by the sequencer sequentially.
 
-The thesis is thematically similar to the Master's Thesis \emph{Automatic Line
-Code Detection of RF Signals on Software Defined Radios}, which also implemented a spectrum analyzer.
-However, it was never planned to record or replay signals.
-In addition, this thesis lacks some scientific rigor with respect to the
-validity of recorded samples.
+Guerraoui et al.~\cite{consensus-number} demonstrated that 
+decentralized payments are possible without global ordering. This insight 
+led to several works in the literature, including FastPay~\cite{fastpay}, 
+ABC~\cite{abc}, and pod~\cite{pod}, which relax the consensus requirement. 
+These systems allow transactions to finalize in just 1–2 network 
+round-trips without requiring validator-to-validator communication. 
+Furthermore, they enable horizontal scalability—nodes can add more 
+machines to increase the network's throughput.
 
+All of these systems were designed specifically for payments.
+Sui Lutris~\cite{sui-lutris} allowed for writing arbitrary smart 
+contracts where the state can only be modified by a single party. 
+However, this design has three key limitations: (1) single-owned states 
+are not expressive enough for building common blockchain applications 
+like balance-based tokens, (2) the system requires adopting new Move 
+language semantics, and (3) it lacks support for essential context data 
+like current timestamp in the fast path— necessary for applications 
+such as auctions and voting systems.
 
 \subsection*{Research Questions}
+\textbf{What data structures and operations are safe in the fast path?} 
 
-\todo{Optional section: Maybe you can formulate research questions which you try to answer in this thesis}
+Sui Lutris \cite{sui-lutris} only allows for single-owned states, which severely 
+hinders the applications possible in the fast path. Consider the simple example 
+of an ERC20 token: the balance cannot be a single-owned value since multiple 
+parties can simultaneously send money to a recipient, incrementing their balance. 
+While concurrent increments are safe in the fast path, as shown by 
+Fastpay \cite{fastpay} and other fast payment constructions, they cannot 
+be implemented using just single-owned states.
 
-\begin{researchquestions}
-\item Do USB interfaces interfere with SDR?
-\end{researchquestions}
+Stingray~\cite{stingray} addresses this by introducing a bounded counter 
+data structure where additions are commutative and can be performed 
+by anyone, while subtractions are restricted to the counter's owner. 
+This enables balance-based tokens in the fast path. 
+
+Counters are a very simple example of CRDTs~\cite{crdt}, 
+where the order of increment 
+operations does not matter. There exist several other CRDTs
+and they are a well-studied class of
+primitives in the distributed computing literature.
+We would like to find how these primitives 
+can be safely used in the fast path, allowing for more 
+expressive smart contracts.
+
+\textbf{Can EVM be modified to support async execution?} 
+
+A key limitation of Sui Lutris is its requirement for smart contract 
+developers to learn a new programming paradigm and semantics, which 
+hinders the adoption of async networks. We would like to explore if 
+EVM—the most widely adopted and mature 
+smart contract environment—to enable async execution. The EVM is 
+a stack-based deterministic state machine that assumes all nodes 
+execute the VM on (i) the same transaction ledger and 
+(ii) with identical context variables, resulting in consistent 
+state updates after each transaction. To safely use the EVM in an 
+async execution environment, both requirements must be relaxed. 
+State reads and writes should exclusively use the fast path primitives 
+described above, ensuring that honest validators maintain consistent states 
+regardless of transaction execution order. Additionally, the 
+usage of context variables, such as timestamps, 
+must be modified to ensure safety in the fast path.
+
+
+\textbf{Is the composition of these primitives safe?} 
+
+We will start by analyzing the individual primitives independently and 
+formally proving their safety and liveness in the async environment. 
+We then aim to propose a model that demonstrates the secure composition 
+of these primitives with the VM. This analysis is crucial for 
+showing that primitives can be safely composed with each other 
+to build arbitrary contracts. 
+
+There are many parallels between an asynchronous fast execution 
+environment and traditional database management systems (DBMS). 
+Both allow state read/write operations while ensuring certain 
+invariants. Since no previous works in the blockchain literature 
+formally examine the composition of such CRDT primitives, we plan 
+to draw inspiration from traditional DBMS literature for our modeling framework.
 
 \subsection*{Approach}
-In the first part we will make measurements and statistic evaluations to
-ensure, that the acquired data, which comes from the SDR, is valid.  Therefore
-we will test, if the samples are valid right after the internal tuning phase of
-the SDR.
-We will also investigate whether or not external influences such as the USB
-interface interfere with the process.
-Other influence such as the quantization error will also be analyzed.
-The latter are of particular interest when it comes to replay of previously
-recorded signals.
-The second part is about the scanning application itself.
-The program can use the wide range of the present USRP hardware, which covers a
-frequency range from 75\,MHz to 6\,GHz.
-The tool would scan the whole band for online investigation or store the
-samples for later use.
-Further more, you will be able to rescan narrow bands of the spectrum to have a
-closer look whats happening there.
-The UI will consist of a zoomable heatmap (waterfall diagram) interface with
-mouse support.
+\paragraph{Literature Review} We will conduct a comprehensive review of state-of-the-art asynchronous protocols to understand their differences, limitations, models, and proving techniques. We will also examine traditional DBMS systems for insights into VM and primitive composition modeling.
 
-To get proper values to display, we have to consider different parameters like
-integration time and gain settings etc.
-These parameters will also be part of the research.
-The software will be based on the GNUradio software defined radio
-framework.  The additional work is planed to be done with python3.
-The used hardware consists of 2 URSP b210, where for the main part only one is
-needed.
+\paragraph{Core construction} We will introduce CRDT-like primitives—Sets, Counters, Owned States, and Bounded Counters—and implement modifications to the EVM to expose these primitives to the smart contract environment. We will also design an interface for safe timestamp exposure in the execution environment. that expose these primitives to the smart contract environment.
 
-\subsection*{Skills}
-\todo{Optional section: include only if you
-have worked on projects that are relevant for this thesis.}
+\paragraph{Analysis} We will develop a model to analyze this construction and prove that these primitives can be safely instantiated independently and composed within the new VM.
 
-I did some previous work with SDR hardware, the RTL-SDR and the
-hackrf.
-For this work the packet generator MoonGen was used~\cite{DBLP:conf/imc/EmmerichGRWC15}.
-I am quite familiar with the software (GNUradio) and
-hardware environment.
-
-\subsection*{Additional Hardware Requirements}
-\todo{Optional section: include only if you
-    need new hardware for this thesis.}
+\paragraph{Prototype and Applications}
+We will build a prototype of the modified VM with an async network and conduct basic benchmarks. To demonstrate the value of these modified VMs, we will implement contracts for common blockchain applications: fungible and non-fungible tokens, registries, auctions, and voting systems.
 
 \subsection*{Planned Schedule}
 \begin{figure}[H]
   \centering
   \begin{ganttchart}[
-      x unit=1.25mm,
+      x unit=0.8mm,
       y unit title=0.6cm,
       title height=1,
       title label font=\small,
@@ -153,15 +217,14 @@ hardware environment.
       time slot unit=day,
       inline,
       bar height=0.7,
-    ]{2016-04-15}{2016-08-25}
+    ]{2025-07-01}{2025-12-30}
     \gantttitlecalendar{month=name}\\
-    \ganttbar{Reading}{2016-04-15}{2016-04-28}\\
-    \ganttbar{Setup testbed}{2016-04-15}{2016-05-05}\\
-    \ganttbar{Work on first prototype}{2016-05-01}{2016-05-30}\\
-    \ganttbar{Perform measurements}{2016-05-20}{2016-07-15}\\
-    \ganttmilestone{Intermediate talk}{2016-06-15}\\
-    \ganttbar{Write thesis}{2016-06-30}{2016-08-15}\\
-    \ganttmilestone{Submission}{2016-08-14}
+    \ganttbar{Literature Review}{2025-07-01}{2025-08-15}\\
+    \ganttbar{Core Construction}{2025-07-30}{2025-09-15}\\
+    \ganttbar{Analysis}{2025-09-15}{2025-11-15}\\
+    \ganttbar{Prototype}{2025-11-15}{2025-12-23}\\
+    \ganttmilestone{Intermediate talk}{2025-10-15}\\
+    \ganttmilestone{Submission}{2025-12-24}
   \end{ganttchart}
   \label{fig:work-plan}
 \end{figure}
