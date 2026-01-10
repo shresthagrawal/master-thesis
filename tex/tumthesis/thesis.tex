@@ -1,4 +1,4 @@
-\documentclass[IN,11pt,twoside,openright,bachelor,english]{tumthesis}
+\documentclass[IN,11pt,twoside,openright,master,english]{tumthesis}
 % use option esig if you include an electronic signature
 
 % Include common packages
@@ -75,12 +75,12 @@
 \makeatother
 
 % Needed for Bachelor's theses, Master's theses and IDP
-\titleenglish{Link Layer Network Coding in Wireless Networks}
-\titlegerman{Link Layer Network Coding in kabellosen Netzwerken}
-\author{Stephan~Matthias~G\"unther}
+\titleenglish{Fast-Path Recovery for Asynchronous Protocols}
+\titlegerman{Fast-Path-Wiederherstellung für asynchrone Protokolle}
+\author{Shresth~Agrawal}
 \supervisor{\chairhead}
-\assistants{Dr.-Ing.~Stephan~M.~G\"unther\tlc{},%
-Sebastian~Gallenmüller\tlc{}~B.\,Sc.}
+\assistants{Dr.~Zeta~Avarikioti,%
+Filip~Rezabek~\&~Kilian~Glas}
 
 % Only needed for dissertation
 \chairman{\makebox[7cm]{\dotfill}}
@@ -96,7 +96,7 @@ Sebastian~Gallenmüller\tlc{}~B.\,Sc.}
 %\courseofstudy{Elektrotechnik}
 %\courseofstudy{Electrical Engineering}
 
-\date{September 15, 2016}
+\date{December 2025}
 
 % Only for accepted disserations
 %\date[November 15, 2021]{September 15, 2021} % [acceptance date]{hand-in date}
@@ -107,6 +107,7 @@ Sebastian~Gallenmüller\tlc{}~B.\,Sc.}
 
 \addbibresource{bib/IEEEfull.bib}
 \addbibresource{bib/litnew.bib}
+\addbibresource{bib/lit.bib}
 
 
 %\renewcommand{\andothersdelim}{}
@@ -131,11 +132,11 @@ Sebastian~Gallenmüller\tlc{}~B.\,Sc.}
 	\input{include/abstract-en}
 \end{abstract}
 
-\begin{otherlanguage}{ngerman}
-	\begin{abstract}
-		\input{include/abstract-de}
-	\end{abstract}
-\end{otherlanguage}
+%\begin{otherlanguage}{ngerman}
+%	\begin{abstract}
+%		\input{include/abstract-de}
+%	\end{abstract}
+%\end{otherlanguage}
 
 % Reset acronyms used in abstract
 \acresetall
@@ -154,8 +155,13 @@ Sebastian~Gallenmüller\tlc{}~B.\,Sc.}
 
 \startcontent
 
-\input{include/chapter1}
-\input{include/chapter2}
+\input{include/introduction}
+\input{include/background}
+\input{include/related-work}
+\input{include/theoretical-results}
+\input{include/protocol}
+\input{include/implementation}
+\input{include/conclusion}
 
 \appendix
 \input{include/appendix}
