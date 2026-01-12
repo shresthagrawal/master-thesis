@@ -14,7 +14,92 @@
 \section{Recovery Mechanism and Pseudocode}
 \label{sec:recovery-mechanism}
 
-% TODO: Write content
+Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert} present the extended validator protocol with recovery support. Validators maintain an internal attestation store that records all votes they have broadcast.
+
+\begin{algorithm}[ht]
+\caption{Validator with Recovery - Transaction Handling}\label{alg:validator-recovery-tx}
+\begin{algorithmic}[1]
+\State \textbf{global} $\mathcal{V}$: validator set, $\mathsf{recovery\_contract}$: recovery address
+\State \textbf{state} $\mathsf{account}[\cdot]$: mapping from public key to $(\mathsf{balance}, \mathsf{nonce}, \mathsf{pending}, \mathsf{finalised})$
+\Statex
+\Procedure{OnTransaction}{$tx, \sigma$}
+    \State \textbf{verify} $\sigma$ is valid signature from $tx.\mathsf{sender}$ on $tx$
+    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} = \mathsf{false}$
+    \State \textbf{require} $tx.\mathsf{nonce} = \mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce}$
+    \If{$tx.\mathsf{recipient} = \mathsf{recovery\_contract}$}
+        \State \Call{ValidateRecovery}{$tx$}
+    \Else
+        \State \Call{ValidatePayment}{$tx$}
+    \EndIf
+    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{true}$
+    \State broadcast $\langle \mathsf{vote}, tx.\mathsf{sender}, tx.\mathsf{nonce}, tx \rangle_v$ to $\mathcal{V}$
+\EndProcedure
+\Statex
+\Procedure{ValidateRecovery}{$tx$}
+    \State $\mathsf{target\_tx} \gets tx.\mathsf{data}.\mathsf{target\_tx}$
+    \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\mathsf{target\_tx}$ at nonce $\mathsf{target\_tx}.\mathsf{nonce}$
+    \For{$k \gets \mathsf{target\_tx}.\mathsf{nonce} + 1$ \textbf{to} $tx.\mathsf{nonce} - 1$}
+        \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\bot$ at nonce $k$
+    \EndFor
+\EndProcedure
+\Statex
+\Procedure{ValidatePayment}{$tx$}
+    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{finalised} = tx.\mathsf{nonce} - 1$
+    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \geq tx.\mathsf{amount}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[ht]
+\caption{Validator with Recovery - Certificate Handling}\label{alg:validator-recovery-cert}
+\begin{algorithmic}[1]
+\Procedure{OnCertificate}{$C$}
+    \State \textbf{require} $C$ is valid $(\geq n-f)$-certificate for some nonce $k$
+    \State $(q, \mathsf{vote}) \gets \text{max quorum in } C$
+    \State $a \gets \mathsf{vote}.\mathsf{account}$
+    \Statex
+    \If{$\mathsf{vote}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{nonce}$}
+        \If{$q < n - 3f$}
+            \Comment{no full quorum for $k$}
+            \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{true}$
+            \State broadcast $\langle \mathsf{vote}, a, \mathsf{vote}.\mathsf{nonce}, \bot \rangle_v$ to $\mathcal{V}$
+        \ElsIf{$\mathsf{account}[a].\mathsf{pending}$}
+            \Comment{update nonce and pending}
+            \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{account}[a].\mathsf{nonce} + 1$
+            \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
+        \EndIf
+    \EndIf
+    \Statex
+    \If{$q \geq n - f$}
+        \Comment{safely move nonce forward}
+        \If{$\mathsf{vote}.\mathsf{nonce} \geq \mathsf{account}[a].\mathsf{nonce}$}
+            \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{vote}.\mathsf{nonce} + 1$
+            \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
+        \EndIf
+        \Comment{finalize and execute}
+        \If{$\mathsf{vote}.\mathsf{nonce} > \mathsf{account}[a].\mathsf{finalised}$ \textbf{and} $\mathsf{vote}.\mathsf{tx} \neq \bot$}
+            \State $tx \gets \Call{GetTxChainStart}{\mathsf{vote}.\mathsf{tx}}$
+            \If{$tx.\mathsf{nonce} \leq \mathsf{account}[a].\mathsf{finalised} + 1$}
+                \Comment{can finalize}
+                \If{$tx.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
+                    \State $\mathsf{account}[a].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$
+                    \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
+                \EndIf
+                \State $\mathsf{account}[a].\mathsf{finalised} \gets \mathsf{vote}.\mathsf{nonce}$
+            \EndIf
+        \EndIf
+    \EndIf
+\EndProcedure
+\Statex
+\Procedure{GetTxChainStart}{$tx$}
+    \If{$tx.\mathsf{recipient} = \mathsf{recovery\_contract}$}
+        \State \Return \Call{FetchTransaction}{$tx.\mathsf{data}.\mathsf{target\_tx}$}
+    \Else
+        \State \Return $tx$
+    \EndIf
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
 
 \section{Safety and Liveness Arguments}
 \label{sec:safety-liveness}
