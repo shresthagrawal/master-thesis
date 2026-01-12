@@ -69,16 +69,16 @@
 % Load base class report and required packages
 %
 \LoadClassWithOptions{report}
-\RequirePackage{tumlang}
-\RequirePackage{tumcolor}
-\RequirePackage{tumcontact}
+\RequirePackage{tumcommon/tumlang}
+\RequirePackage{tumcommon/tumcolor}
+\RequirePackage{tumcommon/tumcontact}
 \RequirePackage{geometry}
 \RequirePackage{setspace}
 \RequirePackage{parskip}
 \RequirePackage[pagestyles,clearempty]{titlesec}
 \RequirePackage{pfnote}        % per-page footnotes
 \RequirePackage{iflang}
-\RequirePackage{tumcmd}
+\RequirePackage{tumcommon/tumcmd}
 
 %----------------------------------------------------------------------
 % Page geometry

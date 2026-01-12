@@ -27,8 +27,8 @@
 % Load base class report and required packages
 %
 \LoadClassWithOptions{article}
-\RequirePackage{tumlang}
-\RequirePackage{tumcontact}
+\RequirePackage{tumcommon/tumlang}
+\RequirePackage{tumcommon/tumcontact}
 \RequirePackage{legacylogos}
 \RequirePackage{xparse}
 \RequirePackage{geometry}
