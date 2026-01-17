@@ -1,51 +1,294 @@
 \chapter{Extending FastPay with Recovery}
 \label{chap:protocol}
 
-\section{Fault Model and Assumptions}
-\label{sec:fault-model}
-
-% TODO: Write content
-
 \section{Protocol Overview}
 \label{sec:protocol-overview}
 
-% TODO: Write content
+In this section, we progressively extend the FastPay construction to allow for full recovery. On a high level,
+we would like a healed client to send a special \emph{recovery transaction} that allows validators to safely
+release the pending state and move the client's nonce forward.
 
-\section{Recovery Mechanism and Pseudocode}
-\label{sec:recovery-mechanism}
+The main challenge is ensuring safety: previously confirmed transactions must not be reverted. Recall from
+Chapter~\ref{chap:background} that a key property of FastPay is that a payment recipient can verify a quorum
+certificate and be certain that the payment will not be reverted, even if the client is malicious. Our recovery
+mechanism must preserve this property.
 
-Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert} present the extended validator protocol with recovery support. Validators maintain an internal attestation store that records all votes they have broadcast.
+\textbf{Recovery to the transaction with majority support.}
+Our first extension introduces a recovery transaction that points to a previous transaction called the \emph{tip} - the
+transaction that is safe to recover to. The client provides an $(n-f)$-certificate with majority support for the
+tip transaction. This certificate serves as proof that the tip transaction is the one that should be finalized.
+
+\textbf{The $3f+1$ Model.}
+Consider a concrete example with $n = 4$ validators and $f = 1$ Byzantine validator. A certificate requires
+$n - f = 3$ votes. Suppose a malicious client constructs two conflicting transactions $\mathsf{tx}$ and $\mathsf{tx}'$
+at the same nonce. The client sends $\mathsf{tx}$ to validators $\{V_1, V_2, V_4\}$ and $\mathsf{tx}'$ to validators
+$\{V_3, V_4\}$, where $V_4$ is Byzantine and signs both transactions. The client can then:
+\begin{enumerate}
+    \item Obtain a finality certificate for $\mathsf{tx}$ with votes from $\{V_1, V_2, V_4\}$-a recipient of
+        $\mathsf{tx}$ now considers the payment confirmed.
+    \item Construct a conflicting $(n-f)$-certificate with votes $\{V_1, V_3, V_4\}$ where $\mathsf{tx}'$ has
+        majority support (2 out of 3 votes from $V_3$ and $V_4$).
+\end{enumerate}
+If an honest client uses this certificate to recover with $\mathsf{tx}'$ as the tip, this violates safety:
+the previously finalized transaction $\mathsf{tx}$ is reverted, invalidating a confirmed payment.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    tick/.style={font=\LARGE},
+    bt/.style={tick, color=TUMBlue},
+    gt/.style={tick, color=TUMGreen},
+    byzmark/.style={font=\scriptsize, inner sep=0pt},
+    lbl/.style={font=\small, align=center}
+]
+
+% Certificate A (finalised)
+\draw[thick] (-1.1,-0.5) rectangle (1.1,0.5);
+\node[bt] at (-0.6,0) {\checkmark};
+\node[bt] at (0,0) {\checkmark};
+\node[bt] at (0.6,0) {\checkmark};
+\node[color=red, font=\scriptsize] at (0.85,0.25) {$\bigstar$};
+\node[lbl] at (0,-1) {certificate A (finalised)};
+
+% Certificate B
+\draw[thick, dashed] (3.4,-0.5) rectangle (5.6,0.5);
+\node[bt] at (3.9,0) {\checkmark};
+\node[bt] at (4.5,0) {\checkmark};
+\node[color=red, font=\scriptsize] at (4.75,0.25) {$\bigstar$};
+\node[gt] at (5.1,0) {\checkmark};
+\node[lbl] at (4.5,-1) {certificate B\\\textit{is it locked?}};
+
+% Certificate C
+\draw[thick, dashed] (7.4,-0.5) rectangle (9.6,0.5);
+\node[bt] at (7.9,0) {\checkmark};
+\node[color=red, font=\scriptsize] at (8.15,0.25) {$\bigstar$};
+\node[gt] at (8.5,0) {\checkmark};
+\node[gt] at (9.1,0) {\checkmark};
+\node[lbl] at (8.5,-1) {certificate C\\\textit{is it locked?}};
+
+% Global view
+% Solid box covering first 3 ticks (positions 1, 2, 3)
+\draw[thick] (2.9,-3) rectangle (4.9,-2);
+% Dotted box covering last 3 ticks (positions 2, 3, 4)
+\draw[thick, dashed] (3.4,-3) rectangle (5.4,-2);
+% Position 1: blue
+\node[bt] at (3.4,-2.5) {\checkmark};
+% Position 2: blue
+\node[bt] at (3.9,-2.5) {\checkmark};
+% Position 3: blue+green stacked (Byzantine voter)
+\node[bt] at (4.4,-2.35) {\checkmark};
+\node[gt] at (4.4,-2.65) {\checkmark};
+% Red star for the malicious vote
+\node[color=red, font=\scriptsize] at (4.65,-2.1) {$\bigstar$};
+% Position 4: green
+\node[gt] at (4.9,-2.5) {\checkmark};
+\node[lbl] at (4.15,-3.5) {global view};
+
+\end{tikzpicture}
+\caption{The strawman recovery problem in the $3f+1$ model. Certificate A is finalized with 3 votes (including Byzantine validator marked with {\color{red}$\bigstar$}).
+Certificates B and C show two possible $(n-f)$-certificates where the conflicting transaction $\mathsf{tx}'$ has majority support.
+The global view reveals that the Byzantine validator signed both transactions, enabling a safety violation.}
+\label{fig:strawman-attack}
+\end{figure}
+
+\textbf{The $5f+1$ Model.}
+Consider the same scenario in the $5f+1$ model with $n = 6$ validators and $f = 1$ Byzantine validator. A certificate
+now requires $n - f = 5$ votes. To obtain a finality certificate for $\mathsf{tx}$, the client must obtain votes from
+4 honest validators plus the 1 Byzantine validator it controls, say $\{V_1, V_2, V_3, V_4, V_6\}$ where $V_6$ is Byzantine.
+If the client attempts to create a conflicting certificate for $\mathsf{tx}'$, only one honest validator $V_5$ remains
+who has not voted for $\mathsf{tx}$. Therefore, any $(n-f)$-certificate must contain at least 3 votes for $\mathsf{tx}$
+(a majority) and can have at most 2 votes for $\mathsf{tx}'$.
+
+More generally, any two $(n-f)$-certificates must share at least $(n-f) + (n-f) - n = n - 2f = 3f + 1$ validators.
+Of these $3f + 1$ shared validators, at most $f$ are Byzantine, so at least $2f + 1$ are honest. Since honest
+validators never sign conflicting transactions, any two $(n-f)$-certificates share an honest majority that voted
+for the same transaction. This guarantees safe recovery: if a transaction $\mathsf{tx}$ ever receives a finality
+certificate, then every $(n-f)$-certificate will have majority support for $\mathsf{tx}$.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    tick/.style={font=\LARGE},
+    bt/.style={tick, color=TUMBlue},
+    gt/.style={tick, color=TUMGreen},
+    lbl/.style={font=\small, align=center}
+]
+
+% Certificate A (5 votes - finalised)
+\draw[thick] (-1.4,-0.5) rectangle (1.6,0.5);
+\node[bt] at (-1.0,0) {\checkmark};
+\node[bt] at (-0.4,0) {\checkmark};
+\node[bt] at (0.2,0) {\checkmark};
+\node[bt] at (0.8,0) {\checkmark};
+\node[bt] at (1.2,0) {\checkmark};
+\node[color=red, font=\scriptsize] at (1.45,0.25) {$\bigstar$};
+\node[lbl] at (0.1,-1) {certificate A (5 votes, finalised)};
+
+% Certificate B (5 votes: 3 blue + 2 green)
+\draw[thick, dashed] (4.0,-0.5) rectangle (7.0,0.5);
+\node[bt] at (4.5,0) {\checkmark};
+\node[bt] at (5.1,0) {\checkmark};
+\node[bt] at (5.7,0) {\checkmark};
+\node[gt] at (6.3,0) {\checkmark};
+\node[color=red, font=\scriptsize] at (6.55,0.25) {$\bigstar$};
+\node[gt] at (6.7,0) {\checkmark};
+\node[lbl] at (5.5,-1) {certificate B (5 votes, 3 blue)};
+
+% Global view (6 validators: 4 blue, 1 blue+green, 1 green)
+% Solid box around first 5 validators
+\draw[thick] (1.3,-3) rectangle (4.7,-2);
+% Dotted box around last 5 validators
+\draw[thick, dashed] (1.9,-3) rectangle (5.3,-2);
+% Position 1: blue (solid only)
+\node[bt] at (1.8,-2.5) {\checkmark};
+% Position 2: blue (both boxes)
+\node[bt] at (2.4,-2.5) {\checkmark};
+% Position 3: blue (both boxes)
+\node[bt] at (3.0,-2.5) {\checkmark};
+% Position 4: blue (both boxes)
+\node[bt] at (3.6,-2.5) {\checkmark};
+% Position 5: blue+green stacked (both boxes, Byzantine)
+\node[bt] at (4.2,-2.35) {\checkmark};
+\node[gt] at (4.2,-2.65) {\checkmark};
+\node[color=red, font=\scriptsize] at (4.45,-2.1) {$\bigstar$};
+% Position 6: green (dotted only)
+\node[gt] at (4.8,-2.5) {\checkmark};
+\node[lbl] at (3.3,-3.5) {global view (6 validators)};
+
+\end{tikzpicture}
+\caption{The $5f+1$ model enables safe recovery. Certificate B has 5 votes but must contain at least 3 validators
+(blue) who also voted for $\mathsf{tx}$ in certificate A. The Byzantine validator is marked with {\color{red}$\bigstar$}.}
+\label{fig:5f1-safe}
+\end{figure}
+
+This property forms the basis for our recovery mechanism. When a client's account becomes locked due to
+a failed transaction at nonce $k$, the client can submit a \emph{recovery transaction} with the next nonce,
+the transaction to recover, and a past $(n-f)$-certificate that shows majority votes for that transaction.
+Such a certificate guarantees that no conflicting $(n-f)$-finality certificate can exist for a different
+transaction $\mathsf{tx}'$. Note that multiple such certificate-transaction pairs may exist, but it is safe
+to recover with any of them. Validators verify the certificate and safely advance the account's nonce,
+allowing the client to resume transacting.
+
+\textbf{Signing $\bot$ in the absence of majority support.}
+It is not guaranteed that an $(n-f)$-certificate with majority support for a single transaction always exists.
+Consider a scenario where a malicious client sends a different transaction to each validator. In this case,
+no transaction receives enough votes to form a quorum, and no $(n-f)$-certificate has majority support for
+any single transaction.
+
+To handle this case, if a client shows an $(n-f)$-certificate with no majority transaction, validators sign
+$\bot$ (bottom) signaling that there is no transaction that could be finalized for this nonce. When a client
+presents an $(n-f)$-certificate where $\bot$ has majority support, validators can safely skip that nonce and
+move forward. As a result, not all nonces will have a finality certificate - some may be skipped during recovery.
+When a higher nonce is finalized, all previous nonces are also considered finalized. 
+
+\textbf{Recursive Recovery.}
+A subtle issue arises when a malicious client creates conflicting recovery transactions that point to different
+tips. As discussed earlier, multiple $(n-f)$-certificates with different majority support can exist, so a
+malicious client can create valid but conflicting recovery transactions. This causes the account to become
+locked again during the recovery process itself. To handle this, we allow a recovery transaction to point
+to a previous recovery transaction, not just a normal transaction.
+
+Consider an example: suppose a client's account is locked at nonce $k$ with a normal transaction $\mathsf{tx}_k$
+that has an $(n-3f)$-certificate. The client initiates recovery at nonce $k+1$, but the recovery also fails
+due to conflicting recovery transactions. The client must now recover again at nonce $k+2$. This recovery
+transaction at nonce $k+2$ can either:
+\begin{itemize}
+    \item Point to a recovery transaction at nonce $k+1$ if one has an $(n-3f)$-certificate, or
+    \item Point back to the original transaction $\mathsf{tx}_k$ at nonce $k$, along with a $\bot$ certificate
+        for nonce $k+1$ indicating it should be skipped.
+\end{itemize}
+
+More generally, a recovery transaction must point to a non-$\bot$ transaction (either recovery or normal)
+that has an $(n-3f)$-certificate, along with $\bot$ certificates for any intermediate nonces that should
+be skipped. This creates a chain of recovery transactions that eventually ends at a normal transaction.
+Skipping nonces with $\bot$ certificates is safe because they guarantee that no transaction was finalized
+at those nonces.
+
+
+\section{Complete Protocol and Pseudocode}
+\label{sec:complete-protocol}
+
+We now present the complete protocol with recovery support. In the optimistic case where no account lock occurs,
+the protocol follows the same flow as standard FastPay: the client sends a transaction, collects $n-f$ votes
+to form a certificate, and broadcasts the certificate to finalize the transaction.
+
+\textbf{Recovery Contract Address and Transaction Structure.}
+We designate a special address $\mathsf{recovery\_contract}$ as a precompiled contract for handling recovery
+transactions. This approach maintains backward compatibility with existing Ethereum wallets and tooling, as
+the transaction structure remains unchanged - clients simply send a transaction to the recovery contract address.
+A recovery transaction has the following structure:
+\[
+tx_{\mathsf{rec}} = (\mathsf{sender}, \mathsf{recovery\_contract}, 0, \mathsf{nonce}, \mathsf{tip}),
+\]
+where $\mathsf{tip}$ is a reference to the tip transaction to recover to. The amount field is zero since
+recovery transactions do not transfer value. Validators look up the required certificates from their local
+state to verify the recovery is valid.
+
+\textbf{Validator Protocol.}
+Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert} present the extended validator
+protocol. Unlike standard FastPay, validators now maintain two separate counters: $\mathsf{nonce}$ tracks the
+next nonce to sign, while $\mathsf{finalised}$ tracks the last finalized nonce (line~\ref{line:account-state}).
+
+When a validator receives a transaction (Algorithm~\ref{alg:validator-recovery-tx}), it first verifies the
+signature (line~\ref{line:verify-sig}) and checks that the account is not pending (line~\ref{line:check-pending})
+and the nonce matches (line~\ref{line:check-nonce}). The validator then distinguishes between normal payments
+and recovery transactions based on the recipient address (line~\ref{line:check-recovery}). For normal payments,
+\textsc{ValidatePayment} checks that the previous nonce was finalized (line~\ref{line:check-finalised}) and
+sufficient balance exists (line~\ref{line:check-balance}). For recovery transactions, \textsc{ValidateRecovery}
+verifies that the tip transaction has an $(n-3f)$-certificate (line~\ref{line:check-tip-cert}) and that all
+intermediate nonces have $\bot$ certificates (lines~\ref{line:check-bot-loop}-\ref{line:check-bot-cert}). After
+validation, the validator marks the account as pending (line~\ref{line:set-pending}) and broadcasts its vote
+(line~\ref{line:broadcast-vote}).
+
+When a validator receives a certificate (Algorithm~\ref{alg:validator-recovery-cert}), it extracts the
+transaction with maximum quorum support (line~\ref{line:extract-quorum}). If the quorum size is less than
+$n-3f$ (line~\ref{line:check-no-majority}), the validator signs $\bot$ for that nonce (line~\ref{line:sign-bot}),
+signaling that no transaction can be finalized. If the quorum is at least $n-3f$ and the account is pending
+(line~\ref{line:advance-nonce-pending}), the validator advances the nonce. When a certificate has $n-f$ votes
+(line~\ref{line:check-finality}), the validator can safely finalize the transaction (lines~\ref{line:finalize-check}-\ref{line:update-finalised}).
+For recovery transactions, \textsc{GetTxChainStart} (line~\ref{line:get-tx-chain}) follows the chain back to
+the original tip transaction that should be executed.
+
+\textbf{Client Protocol.}
+Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{SendTransaction} procedure
+follows the standard FastPay flow: construct a transaction, broadcast it to collect $n-f$ votes, and broadcast
+the resulting certificate.
+
+The \textsc{InitiateRecovery} procedure is invoked when the client detects that its account is locked. The
+client queries a fullnode for the current nonce and a non-$\bot$ transaction to use as the tip. The client
+constructs a recovery transaction that references the tip, then follows the same vote collection and certificate
+broadcast process as normal transactions.
 
 \begin{algorithm}[ht]
 \caption{Validator with Recovery - Transaction Handling}\label{alg:validator-recovery-tx}
 \begin{algorithmic}[1]
 \State \textbf{global} $\mathcal{V}$: validator set, $\mathsf{recovery\_contract}$: recovery address
-\State \textbf{state} $\mathsf{account}[\cdot]$: mapping from public key to $(\mathsf{balance}, \mathsf{nonce}, \mathsf{pending}, \mathsf{finalised})$
+\State \textbf{state} $\mathsf{account}[\cdot]$: mapping from public key to $(\mathsf{balance}, \mathsf{nonce}, \mathsf{pending}, \mathsf{finalised})$ \label{line:account-state}
 \Statex
 \Procedure{OnTransaction}{$tx, \sigma$}
-    \State \textbf{verify} $\sigma$ is valid signature from $tx.\mathsf{sender}$ on $tx$
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} = \mathsf{false}$
-    \State \textbf{require} $tx.\mathsf{nonce} = \mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce}$
-    \If{$tx.\mathsf{recipient} = \mathsf{recovery\_contract}$}
+    \State \textbf{verify} $\sigma$ is valid signature from $tx.\mathsf{sender}$ on $tx$ \label{line:verify-sig}
+    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} = \mathsf{false}$ \label{line:check-pending}
+    \State \textbf{require} $tx.\mathsf{nonce} = \mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce}$ \label{line:check-nonce}
+    \If{$tx.\mathsf{recipient} = \mathsf{recovery\_contract}$} \label{line:check-recovery}
         \State \Call{ValidateRecovery}{$tx$}
     \Else
         \State \Call{ValidatePayment}{$tx$}
     \EndIf
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{true}$
-    \State broadcast $\langle \mathsf{vote}, tx.\mathsf{sender}, tx.\mathsf{nonce}, tx \rangle_v$ to $\mathcal{V}$
+    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{true}$ \label{line:set-pending}
+    \State broadcast $\langle \mathsf{vote}, tx.\mathsf{sender}, tx.\mathsf{nonce}, tx \rangle_v$ to $\mathcal{V}$ and listening clients \label{line:broadcast-vote}
 \EndProcedure
 \Statex
 \Procedure{ValidateRecovery}{$tx$}
     \State $\mathsf{target\_tx} \gets tx.\mathsf{data}.\mathsf{target\_tx}$
-    \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\mathsf{target\_tx}$ at nonce $\mathsf{target\_tx}.\mathsf{nonce}$
-    \For{$k \gets \mathsf{target\_tx}.\mathsf{nonce} + 1$ \textbf{to} $tx.\mathsf{nonce} - 1$}
-        \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\bot$ at nonce $k$
+    \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\mathsf{target\_tx}$ at nonce $\mathsf{target\_tx}.\mathsf{nonce}$ \label{line:check-tip-cert}
+    \For{$k \gets \mathsf{target\_tx}.\mathsf{nonce} + 1$ \textbf{to} $tx.\mathsf{nonce} - 1$} \label{line:check-bot-loop}
+        \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\bot$ at nonce $k$ \label{line:check-bot-cert}
     \EndFor
 \EndProcedure
 \Statex
 \Procedure{ValidatePayment}{$tx$}
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{finalised} = tx.\mathsf{nonce} - 1$
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \geq tx.\mathsf{amount}$
+    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{finalised} = tx.\mathsf{nonce} - 1$ \label{line:check-finalised}
+    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \geq tx.\mathsf{amount}$ \label{line:check-balance}
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
@@ -55,48 +298,73 @@ Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert}
 \begin{algorithmic}[1]
 \Procedure{OnCertificate}{$C$}
     \State \textbf{require} $C$ is valid $(\geq n-f)$-certificate for some nonce $k$
-    \State $(q, \mathsf{vote}) \gets \text{max quorum in } C$
+    \State $(q, \mathsf{vote}) \gets \text{max quorum in } C$ \label{line:extract-quorum}
     \State $a \gets \mathsf{vote}.\mathsf{account}$
     \Statex
     \If{$\mathsf{vote}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{nonce}$}
-        \If{$q < n - 3f$}
+        \If{$q < n - 3f$} \label{line:check-no-majority}
             \Comment{no full quorum for $k$}
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{true}$
-            \State broadcast $\langle \mathsf{vote}, a, \mathsf{vote}.\mathsf{nonce}, \bot \rangle_v$ to $\mathcal{V}$
-        \ElsIf{$\mathsf{account}[a].\mathsf{pending}$}
+            \State broadcast $\langle \mathsf{vote}, a, \mathsf{vote}.\mathsf{nonce}, \bot \rangle_v$ to $\mathcal{V}$ \label{line:sign-bot}
+        \ElsIf{$\mathsf{account}[a].\mathsf{pending}$} \label{line:advance-nonce-pending}
             \Comment{update nonce and pending}
             \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{account}[a].\mathsf{nonce} + 1$
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
         \EndIf
     \EndIf
     \Statex
-    \If{$q \geq n - f$}
+    \If{$q \geq n - f$} \label{line:check-finality}
         \Comment{safely move nonce forward}
         \If{$\mathsf{vote}.\mathsf{nonce} \geq \mathsf{account}[a].\mathsf{nonce}$}
-            \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{vote}.\mathsf{nonce} + 1$
+            \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{vote}.\mathsf{nonce} + 1$ \label{line:advance-nonce-final}
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
         \EndIf
         \Comment{finalize and execute}
-        \If{$\mathsf{vote}.\mathsf{nonce} > \mathsf{account}[a].\mathsf{finalised}$ \textbf{and} $\mathsf{vote}.\mathsf{tx} \neq \bot$}
-            \State $tx \gets \Call{GetTxChainStart}{\mathsf{vote}.\mathsf{tx}}$
+        \If{$\mathsf{vote}.\mathsf{nonce} > \mathsf{account}[a].\mathsf{finalised}$ \textbf{and} $\mathsf{vote}.\mathsf{tx} \neq \bot$} \label{line:finalize-check}
+            \State $tx \gets \Call{GetTxChainStart}{\mathsf{vote}.\mathsf{tx}}$ \label{line:get-chain-start}
             \If{$tx.\mathsf{nonce} \leq \mathsf{account}[a].\mathsf{finalised} + 1$}
                 \Comment{can finalize}
                 \If{$tx.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
-                    \State $\mathsf{account}[a].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$
+                    \State $\mathsf{account}[a].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$ \label{line:execute-transfer}
                     \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
                 \EndIf
-                \State $\mathsf{account}[a].\mathsf{finalised} \gets \mathsf{vote}.\mathsf{nonce}$
+                \State $\mathsf{account}[a].\mathsf{finalised} \gets \mathsf{vote}.\mathsf{nonce}$ \label{line:update-finalised}
             \EndIf
         \EndIf
     \EndIf
 \EndProcedure
 \Statex
-\Procedure{GetTxChainStart}{$tx$}
+\Procedure{GetTxChainStart}{$tx$} \label{line:get-tx-chain}
     \If{$tx.\mathsf{recipient} = \mathsf{recovery\_contract}$}
         \State \Return \Call{FetchTransaction}{$tx.\mathsf{data}.\mathsf{target\_tx}$}
     \Else
         \State \Return $tx$
     \EndIf
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{SendTransaction} procedure follows the standard FastPay client protocol: construct a transaction, collect votes from validators, and broadcast the resulting certificate. The \textsc{InitiateRecovery} procedure is invoked when the client detects that its account may be locked. The client queries a trustless fullnode for the account's current nonce and a valid $(n-3f)$-certificate on a non-$\bot$ transaction to use as the recovery point. The client verifies the certificate and constructs a recovery transaction referencing it.
+
+\begin{algorithm}[ht]
+\caption{Client with Recovery}\label{alg:client-recovery}
+\begin{algorithmic}[1]
+\State \textbf{global} $\mathcal{V}$: validator set, $\mathsf{recovery\_contract}$: recovery address
+\State \textbf{state} $\mathsf{nonce}$: next transaction nonce
+\Statex
+\Procedure{SendTransaction}{$\mathsf{to}, \mathsf{amount}$}
+    \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \bot)$
+    \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
+    \State broadcast $(tx, \langle tx \rangle_{\mathsf{self}})$ to $\mathcal{V}$
+    \State wait for $n - f$ valid votes \Comment{certificate formed by validators}
+\EndProcedure
+\Statex
+\Procedure{InitiateRecovery}{}
+    \State $(\mathsf{nonce}, tx) \gets$ fetch current nonce and tip transaction $tx \neq \bot$ from fullnode
+    \State $tx_{\mathsf{rec}} \gets (\mathsf{self}, \mathsf{recovery\_contract}, 0, \mathsf{nonce}, tx)$
+    \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
+    \State broadcast $(tx_{\mathsf{rec}}, \langle tx_{\mathsf{rec}} \rangle_{\mathsf{self}})$ to $\mathcal{V}$
+    \State wait for $n - f$ valid votes to form quorum certificate
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
@@ -111,7 +379,18 @@ Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert}
 
 % TODO: Write content
 
-\section{Applicability to Other Asynchronous Protocols}
+\section{Extending to Other Asynchronous Protocols}
 \label{sec:applicability}
 
-% TODO: Write content
+The recovery mechanism presented in this thesis extends naturally to more expressive asynchronous protocols.
+Sui Lutris~\cite{sui-lutris} generalizes FastPay from simple balance transfers to arbitrary single-writer
+objects. In Lutris, each object has an owner, and only the owner can initiate transactions that modify
+the object. Similar to FastPay, validators check that the objects referenced in a transaction are owned
+by the sender and apply the state transition function sequentially based on the sender's nonce.
+
+The recovery protocol remains exactly the same - only the validation and execution functions change. Instead
+of checking sufficient balance (line~\ref{line:check-balance}), validators verify object ownership. Instead
+of updating balances (line~\ref{line:execute-transfer}), validators execute the smart contract in the VM
+based on the finalized transaction. The protocol guarantees a consistent chain of transactions per account,
+ensuring that all validators arrive at the same account state.
+

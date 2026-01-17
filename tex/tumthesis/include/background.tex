@@ -73,6 +73,15 @@ signed by the sender. Intuitively:
 
 In account-based blockchains, if \textsf{data} is empty, the transaction is treated as a simple transfer; otherwise, it invokes code at the recipient address. In this thesis we focus on FastPay-style payments, and therefore assume $\textsf{data} = \emptyset$ in the concrete construction (Chapter~\ref{chap:protocol}). Later, we discuss how the recovery intuition extends to other asynchronous protocols, including those with single-writer contract-like state.
 
+\textbf{Precompiled contracts.}
+In Ethereum and compatible blockchains, \emph{precompiled contracts} (or \emph{precompiles}) are special addresses
+that provide native functionality implemented directly in the node software rather than as EVM bytecode. Examples
+include cryptographic operations like ECDSA recovery and hash functions. From the client's perspective, interacting
+with a precompile looks identical to calling a regular smart contract: the client sends a transaction to the
+precompile's address with appropriate data. This design maintains backward compatibility with existing wallets
+and tooling, as no changes to the transaction format are required. In Chapter~\ref{chap:protocol}, we use a
+precompile-style approach for our recovery mechanism.
+
 \textbf{The ledger abstraction and state machine replication.}
 A traditional blockchain maintains a global ledger
 \[
@@ -134,7 +143,7 @@ Algorithm~\ref{alg:validator} shows the simplified validator logic.
     \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} = tx.\mathsf{nonce}$
     \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \geq tx.\mathsf{amount}$
     \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{true}$
-    \State \Return $\langle \mathsf{vote}, tx \rangle_v$
+    \State broadcast $\langle \mathsf{vote}, tx \rangle_v$ to $\mathcal{V}$ and listening clients
 \EndProcedure
 \Statex
 \Procedure{OnCertificate}{$tx, C$}
@@ -161,8 +170,7 @@ Algorithm~\ref{alg:client} shows the simplified client logic.
     \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \bot)$
     \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
     \State broadcast $(tx, \langle tx \rangle_{\mathsf{self}})$ to $\mathcal{V}$
-    \State wait for $n - f$ valid votes to construct certificate $C$
-    \State broadcast $(tx, C)$ to $\mathcal{V}$
+    \State wait for $n - f$ valid votes \Comment{certificate formed by validators}
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
@@ -170,10 +178,13 @@ Algorithm~\ref{alg:client} shows the simplified client logic.
 \textbf{Transaction flow.}
 A transaction proceeds in three phases:
 \begin{enumerate}
-    \item \textbf{Validation.} The client constructs a transaction, signs it, and broadcasts it to all validators. Each validator checks that (i) the signature is valid, (ii) no transaction is currently pending for this account, (iii) the nonce matches the expected value, and (iv) the balance is sufficient. If all checks pass, the validator sets the pending flag and returns a signed vote.
-    \item \textbf{Confirmation.} Once the client collects $n - f$ votes, the transaction is considered finalized, even though the state has not yet been updated. This is the confirmation latency of the protocol: $2\delta$ or one network round trip (client to validators and back).
-    \item \textbf{Execution.} The client assembles the votes into a certificate and broadcasts it to all validators. Upon receiving a valid certificate, validators execute the transaction: they clear the pending flag, increment the nonce, and update balances.
+    \item \textbf{Validation.} The client constructs a transaction, signs it, and broadcasts it to all validators. Each validator checks that (i) the signature is valid, (ii) no transaction is currently pending for this account, (iii) the nonce matches the expected value, and (iv) the balance is sufficient. If all checks pass, the validator sets the pending flag and broadcasts its signed vote to all validators and listening clients.
+    \item \textbf{Confirmation.} Once the client observes $n - f$ votes, the transaction is considered finalized, even though the state has not yet been updated. This is the confirmation latency of the protocol: $2\delta$ or one network round trip (client to validators and back).
+    \item \textbf{Execution.} Validators assemble votes into a certificate and broadcast it. Upon receiving a valid certificate, validators execute the transaction: they clear the pending flag, increment the nonce, and update balances.
 \end{enumerate}
+
+\textbf{Note on vote dissemination.}
+Unlike the original FastPay paper where clients assemble and broadcast certificates, we have validators broadcast votes to all validators and listening clients. This simplifies client logic without affecting safety or liveness.
 
 \textbf{Safety.}
 Safety relies on the fact that each validator votes for at most one transaction per nonce (enforced by the pending flag and nonce check). Since $n \geq 3f + 1$, any two $(n-f)$-quorums must intersect in at least $(n - f) + (n - f) - n = n - 2f \geq f + 1$ validators. With at most $f$ Byzantine validators, any two quorums share at least one honest validator. An honest validator only votes once per nonce, so two conflicting certificates for the same nonce cannot both exist. This ensures that conflicting transactions cannot both be finalized.
