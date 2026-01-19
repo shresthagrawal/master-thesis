@@ -4,14 +4,88 @@
 \section{Asynchronous Protocols}
 \label{sec:rw-async-protocols}
 
-% TODO: Write content
+Consensus-free blockchain protocols exploit the observation that asset transfers and other
+restricted state updates do not require total ordering. Instead, these workloads can be finalized
+using local sequencing and quorum certificates, avoiding the latency and coordination overhead of
+global consensus.
 
-\section{Fallback Consensus Based Recovery}
+FastPay~\cite{fastpay} pioneered this approach with a permissioned payment protocol in which clients
+collect validator votes to finalize transfers within a single network round trip, assuming
+non-equivocation. ABC~\cite{abc} and follow-up systems further developed consensus-free
+architectures, demonstrating that payments can be processed using broadcast-style primitives under
+relaxed termination assumptions. Zef~\cite{zef} extends FastPay with privacy guarantees, while
+Pod~\cite{pod} generalizes the approach into an accountable execution layer supporting optimal-latency
+confirmation for a broad class of applications.
+
+Subsequent work increases expressiveness while retaining asynchronous fast paths. Sui
+Lutris~\cite{sui-lutris} introduces an object-based model where single-writer objects bypass
+consensus entirely, with shared objects falling back to consensus when necessary.
+Cuttlefish~\cite{cuttlefish} extends this hybrid approach to collective objects.
+Stingray~\cite{stingray} explores CRDT-like BFT objects, enabling concurrent updates to shared state
+under bounded non-commutativity. CryptoConcurrency~\cite{cryptoconcurrency} analyzes asset transfers
+with shared state, characterizing when consensus can be avoided and when stronger coordination is
+required.
+
+A common limitation across these designs is that fast-path liveness depends on the absence of
+conflicts, typically enforced through client-side sequencing via nonces. Once equivocation occurs,
+these protocols either lose liveness or must invoke additional recovery mechanisms.
+
+\section{Fallback Consensus-Based Recovery}
 \label{sec:fallback-consensus}
 
-% TODO: Write content
+To address liveness failures caused by conflicts, many asynchronous systems incorporate fallback
+consensus mechanisms.
 
-\section{Recovery from Simplex View Change}
-\label{sec:simplex-recovery}
+Sui Lutris~\cite{sui-lutris} explicitly invokes consensus when transactions involve shared objects
+or conflicting accesses, ensuring safety at the cost of higher latency. Consensus on
+Demand~\cite{consensus-on-demand} formalizes this approach by running consensus selectively only
+when conflicts arise, rather than continuously, though this still reintroduces coordination overhead
+and imposes stricter fault thresholds.
 
-% TODO: Write content
+Other systems employ fallback consensus to recover from deadlock or equivocation.
+CryptoConcurrency~\cite{cryptoconcurrency} relies on external consensus objects to resolve
+overspending conflicts. Cuttlefish~\cite{cuttlefish} and Stingray~\cite{stingray} both introduce
+unlock or FastUnlock mechanisms that ultimately depend on consensus or reconfiguration to restore
+progress. In practice, these approaches often rely on periodic reconfiguration or global
+synchronization to clear locked state.
+
+While effective, fallback consensus undermines the core motivation for asynchronous protocols: low
+latency, simplicity, and avoidance of global coordination. This thesis differs from prior work by
+eliminating fallback consensus for client equivocation recovery, while preserving fast-path
+performance.
+
+\section{Recovery as View Change}
+\label{sec:rw-view-change}
+
+Recovery from client equivocation in asynchronous protocols closely resembles view change in
+Byzantine consensus protocols. In classical state-machine replication, a faulty leader may
+equivocate or stall progress, and view-change mechanisms allow replicas to safely move to a new
+leader without violating safety. This idea originates in PBFT~\cite{pbft} and has been refined in
+later protocols such as HotStuff~\cite{hotstuff}, which achieves linear view change and
+responsiveness.
+
+Simplex~\cite{simplex} presents a particularly clean view-change design, separating safety from
+progress and minimizing protocol complexity. More recent work explores optimized view-change and
+finality mechanisms under different fault models. Minimmit~\cite{minimmit}, for example, studies
+fast finality protocols in the $5f+1$ model and analyzes how distinct quorum thresholds can be used
+for progress and finalization in protocols following the Simplex mould.
+
+A recent stream of work revisits the $5f+1$ fault model for fast Byzantine
+consensus~\cite{fab-paxos, revisiting-5f}. Martin and Alvisi~\cite{fab-paxos} originally showed that
+two-step Byzantine consensus requires $5f+1$ processes, later refined to $5f-1$ by Kuznetsov et
+al.~\cite{revisiting-5f}. This model enables single-round-trip finality when a supermajority of
+validators are responsive, while gracefully degrading to slower paths under partial participation.
+Building on these foundations, several recent protocols exploit this
+tradeoff~\cite{minimmit, banyan, kudzu, hydrangea, alpenglow}. Banyan~\cite{banyan} achieves
+single-round-trip confirmation with rotating leaders. Kudzu~\cite{kudzu} provides high throughput
+through erasure-coded block dissemination while maintaining a seamless fast path.
+Hydrangea~\cite{hydrangea} introduces a dual-mode commit mechanism tolerating both Byzantine and
+crash faults. Alpenglow~\cite{alpenglow} applies these ideas to Solana's consensus layer, achieving
+sub-second finality through dual-threshold voting.
+
+Our recovery protocol adopts this perspective: each account acts as a leader, sequencing its own
+transactions across nonces. Client equivocation corresponds to leader equivocation in consensus.
+Recovery consists of collecting validator attestations about prior votes---analogous to view-change
+messages---and safely advancing the account's ``view'' (nonce) without reverting finalized state.
+The design is particularly inspired by Simplex-style view change and the separation of quorum
+thresholds studied in Minimmit, adapted to a per-account asynchronous execution setting.

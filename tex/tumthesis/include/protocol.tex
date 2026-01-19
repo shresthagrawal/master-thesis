@@ -5,7 +5,7 @@
 \label{sec:protocol-overview}
 
 In this section, we progressively extend the FastPay construction to allow for full recovery. On a high level,
-we would like a healed client to send a special \emph{recovery transaction} that allows validators to safely
+we would like a healing client to send a special \emph{recovery transaction} that allows validators to safely
 release the pending state and move the client's nonce forward.
 
 The main challenge is ensuring safety: previously confirmed transactions must not be reverted. Recall from
@@ -42,13 +42,13 @@ the previously finalized transaction $\mathsf{tx}$ is reverted, invalidating a c
     lbl/.style={font=\small, align=center}
 ]
 
-% Certificate A (finalised)
+% Certificate A (finalized)
 \draw[thick] (-1.1,-0.5) rectangle (1.1,0.5);
 \node[bt] at (-0.6,0) {\checkmark};
 \node[bt] at (0,0) {\checkmark};
 \node[bt] at (0.6,0) {\checkmark};
 \node[color=red, font=\scriptsize] at (0.85,0.25) {$\bigstar$};
-\node[lbl] at (0,-1) {certificate A (finalised)};
+\node[lbl] at (0,-1) {certificate A (finalized)};
 
 % Certificate B
 \draw[thick, dashed] (3.4,-0.5) rectangle (5.6,0.5);
@@ -114,7 +114,7 @@ certificate, then every $(n-f)$-certificate will have majority support for $\mat
     lbl/.style={font=\small, align=center}
 ]
 
-% Certificate A (5 votes - finalised)
+% Certificate A (5 votes - finalized)
 \draw[thick] (-1.4,-0.5) rectangle (1.6,0.5);
 \node[bt] at (-1.0,0) {\checkmark};
 \node[bt] at (-0.4,0) {\checkmark};
@@ -122,7 +122,7 @@ certificate, then every $(n-f)$-certificate will have majority support for $\mat
 \node[bt] at (0.8,0) {\checkmark};
 \node[bt] at (1.2,0) {\checkmark};
 \node[color=red, font=\scriptsize] at (1.45,0.25) {$\bigstar$};
-\node[lbl] at (0.1,-1) {certificate A (5 votes, finalised)};
+\node[lbl] at (0.1,-1) {certificate A (5 votes, finalized)};
 
 % Certificate B (5 votes: 3 blue + 2 green)
 \draw[thick, dashed] (4.0,-0.5) rectangle (7.0,0.5);
@@ -245,7 +245,7 @@ transaction with maximum quorum support (line~\ref{line:extract-quorum}). If the
 $n-3f$ (line~\ref{line:check-no-majority}), the validator signs $\bot$ for that nonce (line~\ref{line:sign-bot}),
 signaling that no transaction can be finalized. If the quorum is at least $n-3f$ and the account is pending
 (line~\ref{line:advance-nonce-pending}), the validator advances the nonce. When a certificate has $n-f$ votes
-(line~\ref{line:check-finality}), the validator can safely finalize the transaction (lines~\ref{line:finalize-check}-\ref{line:update-finalised}).
+(line~\ref{line:check-finality}), the validator can safely finalize the transaction and update the finalised counter (line~\ref{line:update-finalised}).
 For recovery transactions, \textsc{GetTxChainStart} (line~\ref{line:get-tx-chain}) follows the chain back to
 the original tip transaction that should be executed.
 
@@ -298,45 +298,50 @@ broadcast process as normal transactions.
 \begin{algorithmic}[1]
 \Procedure{OnCertificate}{$C$}
     \State \textbf{require} $C$ is valid $(\geq n-f)$-certificate for some nonce $k$
-    \State $(q, \mathsf{vote}) \gets \text{max quorum in } C$ \label{line:extract-quorum}
-    \State $a \gets \mathsf{vote}.\mathsf{account}$
+    \State $(q, tx) \gets \text{max quorum in } C$ \label{line:extract-quorum}
+    \State $a \gets C.\mathsf{account}$
     \Statex
-    \If{$\mathsf{vote}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{nonce}$}
+    \If{$k = \mathsf{account}[a].\mathsf{nonce}$}
         \If{$q < n - 3f$} \label{line:check-no-majority}
             \Comment{no full quorum for $k$}
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{true}$
-            \State broadcast $\langle \mathsf{vote}, a, \mathsf{vote}.\mathsf{nonce}, \bot \rangle_v$ to $\mathcal{V}$ \label{line:sign-bot}
+            \State broadcast $\langle \mathsf{vote}, a, k, \bot \rangle_v$ to $\mathcal{V}$ \label{line:sign-bot}
         \ElsIf{$\mathsf{account}[a].\mathsf{pending}$} \label{line:advance-nonce-pending}
             \Comment{update nonce and pending}
-            \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{account}[a].\mathsf{nonce} + 1$
+            \State $\mathsf{account}[a].\mathsf{nonce} \gets k + 1$
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
         \EndIf
     \EndIf
     \Statex
-    \If{$q \geq n - f$} \label{line:check-finality}
-        \Comment{safely move nonce forward}
-        \If{$\mathsf{vote}.\mathsf{nonce} \geq \mathsf{account}[a].\mathsf{nonce}$}
-            \State $\mathsf{account}[a].\mathsf{nonce} \gets \mathsf{vote}.\mathsf{nonce} + 1$ \label{line:advance-nonce-final}
-            \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
-        \EndIf
-        \Comment{finalize and execute}
-        \If{$\mathsf{vote}.\mathsf{nonce} > \mathsf{account}[a].\mathsf{finalised}$ \textbf{and} $\mathsf{vote}.\mathsf{tx} \neq \bot$} \label{line:finalize-check}
-            \State $tx \gets \Call{GetTxChainStart}{\mathsf{vote}.\mathsf{tx}}$ \label{line:get-chain-start}
-            \If{$tx.\mathsf{nonce} \leq \mathsf{account}[a].\mathsf{finalised} + 1$}
-                \Comment{can finalize}
-                \If{$tx.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
-                    \State $\mathsf{account}[a].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$ \label{line:execute-transfer}
-                    \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
-                \EndIf
-                \State $\mathsf{account}[a].\mathsf{finalised} \gets \mathsf{vote}.\mathsf{nonce}$ \label{line:update-finalised}
+    \If{$q \geq n - f$ \textbf{and} $k > \mathsf{account}[a].\mathsf{finalised}$ \textbf{and} $tx \neq \bot$} \label{line:check-finality}
+        \State $tx_{\mathsf{orig}} \gets \Call{GetTxChainStart}{tx}$ \label{line:get-chain-start}
+        \Comment{original tx must be same as finalized or next (+1)}
+        \If{$tx_{\mathsf{orig}}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised}$ \textbf{or} $tx_{\mathsf{orig}}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
+            \If{$tx_{\mathsf{orig}}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
+                \State \Call{ExecuteTransfer}{$tx_{\mathsf{orig}}$} \label{line:execute-transfer}
+            \EndIf
+            \State $\mathsf{account}[a].\mathsf{finalised} \gets k$ \label{line:update-finalised}
+            \If{$k \geq \mathsf{account}[a].\mathsf{nonce}$}
+                \State $\mathsf{account}[a].\mathsf{nonce} \gets k + 1$ \label{line:advance-nonce-final}
+                \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
             \EndIf
         \EndIf
     \EndIf
+    \Statex
+    \Comment{process current nonce if certificate exists}
+    \If{$\exists$ certificate $C'$ for nonce $\mathsf{account}[a].\mathsf{nonce}$}
+        \State \Call{OnCertificate}{$C'$}
+    \EndIf
+\EndProcedure
+\Statex
+\Procedure{ExecuteTransfer}{$tx$}
+    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$
+    \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
 \EndProcedure
 \Statex
 \Procedure{GetTxChainStart}{$tx$} \label{line:get-tx-chain}
     \If{$tx.\mathsf{recipient} = \mathsf{recovery\_contract}$}
-        \State \Return \Call{FetchTransaction}{$tx.\mathsf{data}.\mathsf{target\_tx}$}
+        \State \Return \Call{GetTxChainStart}{$tx.\mathsf{data}.\mathsf{tip}$}
     \Else
         \State \Return $tx$
     \EndIf
@@ -344,7 +349,32 @@ broadcast process as normal transactions.
 \end{algorithmic}
 \end{algorithm}
 
-Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{SendTransaction} procedure follows the standard FastPay client protocol: construct a transaction, collect votes from validators, and broadcast the resulting certificate. The \textsc{InitiateRecovery} procedure is invoked when the client detects that its account may be locked. The client queries a trustless fullnode for the account's current nonce and a valid $(n-3f)$-certificate on a non-$\bot$ transaction to use as the recovery point. The client verifies the certificate and constructs a recovery transaction referencing it.
+Validators also expose a recovery RPC endpoint that returns the information needed for a client to
+recover from a locked state. Algorithm~\ref{alg:validator-recovery-rpc} shows this procedure.
+
+\begin{algorithm}[ht]
+\caption{Validator Recovery RPC}\label{alg:validator-recovery-rpc}
+\begin{algorithmic}[1]
+\Procedure{GetRecoveryInfo}{$\mathsf{account}$}
+    \State $k_f \gets \mathsf{account}[\mathsf{account}].\mathsf{finalised}$
+    \State $k_n \gets \mathsf{account}[\mathsf{account}].\mathsf{nonce}$
+    \State $tx_f \gets$ transaction finalized at nonce $k_f$ (or $\bot$ if none)
+    \State $C_f \gets$ $(n-f)$-certificate for $tx_f$
+    \State $\mathsf{chain} \gets []$
+    \For{$k \gets k_f + 1$ \textbf{to} $k_n - 1$}
+        \State $C_k \gets$ $(n-3f)$-certificate at nonce $k$ (for $tx$ or $\bot$)
+        \State append $(k, C_k)$ to $\mathsf{chain}$
+    \EndFor
+    \State \Return $(k_f, tx_f, C_f, k_n, \mathsf{chain})$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{SendTransaction} procedure
+follows the standard FastPay client protocol: construct a transaction and broadcast it to validators.
+The \textsc{InitiateRecovery} procedure is invoked when the client detects that its account may be locked.
+The client queries validators directly for recovery information, filters out responses with invalid
+certificates, and selects the one with the highest nonce to use as the recovery point.
 
 \begin{algorithm}[ht]
 \caption{Client with Recovery}\label{alg:client-recovery}
@@ -360,9 +390,15 @@ Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{
 \EndProcedure
 \Statex
 \Procedure{InitiateRecovery}{}
-    \State $(\mathsf{nonce}, tx) \gets$ fetch current nonce and tip transaction $tx \neq \bot$ from fullnode
-    \State $tx_{\mathsf{rec}} \gets (\mathsf{self}, \mathsf{recovery\_contract}, 0, \mathsf{nonce}, tx)$
-    \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
+    \State $\mathsf{responses} \gets$ query \Call{GetRecoveryInfo}{$\mathsf{self}$} from each $v \in \mathcal{V}$
+    \State filter $\mathsf{responses}$ to keep only those with valid certificates
+    \State $(k_f, tx_f, C_f, k_n, \mathsf{chain}) \gets$ response with highest $k_n$
+    \State $tx_{\mathsf{tip}} \gets$ last non-$\bot$ transaction in $\mathsf{chain}$
+    \If{$tx_{\mathsf{tip}} = \bot$}
+        \State $tx_{\mathsf{tip}} \gets tx_f$ \Comment{all intermediate nonces are $\bot$, recover to last finalized}
+    \EndIf
+    \State $tx_{\mathsf{rec}} \gets (\mathsf{self}, \mathsf{recovery\_contract}, 0, k_n, tx_{\mathsf{tip}})$
+    \State $\mathsf{nonce} \gets k_n + 1$
     \State broadcast $(tx_{\mathsf{rec}}, \langle tx_{\mathsf{rec}} \rangle_{\mathsf{self}})$ to $\mathcal{V}$
     \State wait for $n - f$ valid votes to form quorum certificate
 \EndProcedure
@@ -372,12 +408,151 @@ Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{
 \section{Safety and Liveness Arguments}
 \label{sec:safety-liveness}
 
-% TODO: Write content
+We state safety as a \emph{per-account common prefix} property: for each sender account $a$, validators maintain a local view of a chain of finalized actions indexed by the sender's nonce. Safety means that honest validators never disagree about this per-account chain.
 
-\section{Discussion: 5f+1 Fast Path and 3f+1 with an Extra Round Trip}
-\label{sec:discussion-fault-models}
+\subsection{Per-Account Finalized Chain}
 
-% TODO: Write content
+Fix an account $a$. Each validator $v_i$ maintains two counters: $\mathsf{finalised}[a]$ (the last finalized nonce) and $\mathsf{nonce}[a]$ (the next nonce it is willing to vote on). We define the \emph{per-account finalized chain} at validator $v_i$ as:
+\[
+L_i^a = (\ell_i^a(1), \ell_i^a(2), \ldots, \ell_i^a(\mathsf{finalised}_i[a])),
+\]
+where each entry $\ell_i^a(k)$ is either a transaction $tx_k$ (payment or recovery) with $(tx_k.\mathsf{sender} = a, tx_k.\mathsf{nonce} = k)$, or the symbol $\bot$ (nonce $k$ is skipped).
+
+\begin{definition}[Per-account common prefix]
+For any account $a$ and any two honest validators $v_i, v_j$, their chains $L_i^a$ and $L_j^a$ are prefix comparable. Equivalently, for all $k \leq \min(\mathsf{finalised}_i[a], \mathsf{finalised}_j[a])$: $\ell_i^a(k) = \ell_j^a(k)$.
+\end{definition}
+
+This implies standard confirmation safety: if a recipient observes a valid finality certificate for a payment $tx$ from $a$ at nonce $k$, then every honest validator's chain that reaches nonce $k$ contains $tx$ at position $k$.
+
+\subsection{FastPay Without Recovery}
+
+In the optimistic protocol, validators enforce local sequencing using the nonce check and pending flag. An honest validator votes for at most one payment transaction per $(a, k)$.
+
+\begin{lemma}[Uniqueness at a nonce]
+\label{lem:uniqueness}
+For fixed $(a, k)$, there cannot exist two distinct non-$\bot$ transactions $tx \neq tx'$ such that both obtain finality quorums of size $n - f$.
+\end{lemma}
+
+\begin{proof}
+Any two sets of size $n - f$ intersect in at least $(n-f) + (n-f) - n = n - 2f \geq f + 1$ validators (for $n \geq 3f + 1$). At least one is honest and cannot vote for two different non-$\bot$ transactions at the same $(a, k)$.
+\end{proof}
+
+\subsection{Recovery Preserves Common Prefix}
+
+Recovery introduces skipping nonces ($\bot$ entries) and finalizing recovery transactions that execute earlier payments. We must show: (A) recovery transactions do not fork at their own nonce, and (B) recovery cannot revert previously confirmed payments.
+
+\textbf{(A) No fork at recovery nonce.} A recovery transaction is subject to the same pending and nonce checks as payments. By Lemma~\ref{lem:uniqueness}, two distinct non-$\bot$ transactions (payment or recovery) cannot both obtain finality quorums at the same $(a, k)$.
+
+\textbf{(B) Recovery cannot change finalized entries.} The $5f+1$ model ensures that if any transaction was finalized, a conflicting tip cannot be justified.
+
+\begin{lemma}[Finalized transactions block conflicting tips]
+\label{lem:no-conflicting-tip}
+Assume $n \geq 5f + 1$. If a transaction $tx$ at $(a, k)$ has a finality quorum of size $n - f$, then no conflicting transaction $tx' \neq tx$ at $(a, k)$ can obtain an $(n - 3f)$-certificate.
+\end{lemma}
+
+\begin{proof}
+Let $F$ be the $n - f$ validators who voted for $tx$. Suppose $tx'$ has a notarization set $N$ of size $n - 3f$. Then $|F \cap N| \geq (n-f) + (n-3f) - n = n - 4f \geq f + 1$ (since $n \geq 5f + 1$). Thus $F \cap N$ contains at least one honest validator who cannot vote for two different transactions at $(a, k)$.
+\end{proof}
+
+Since \textsc{ValidateRecovery} requires an $(n-3f)$-certificate for the tip, a recovery transaction cannot point to a conflicting transaction if the original was finalized.
+
+\begin{lemma}[Skipping is safe]
+\label{lem:skip-safe}
+Assume $n \geq 5f + 1$. If an $(n - 3f)$-certificate for $\bot$ exists at $(a, k)$, then no transaction at nonce $k$ can be finalized.
+\end{lemma}
+
+\begin{proof}
+Honest validators sign $\bot$ only after observing an $(n-f)$-certificate with no value reaching $n - 3f$ support. In the $5f+1$ model, if any transaction had an $(n-f)$-finality quorum, any $(n-f)$-certificate must contain at least $n - 3f$ votes for that transaction. Hence observing no $n - 3f$ support implies no finality occurred.
+\end{proof}
+
+\begin{theorem}[Per-account common prefix safety]
+\label{thm:safety}
+Assume $n \geq 5f + 1$. For any account $a$, the protocol maintains per-account common prefix: for any two honest validators $v_i, v_j$, their chains $L_i^a$ and $L_j^a$ are prefix comparable.
+\end{theorem}
+
+\begin{proof}
+Consider the first nonce $k$ where two honest validators disagree. Disagreement at $k$ can only arise in three ways:
+\begin{enumerate}
+    \item Two different non-$\bot$ transactions both finalized via the fast path: impossible by Lemma~\ref{lem:uniqueness}.
+    \item One validator has $\bot$ and another has a non-$\bot$ transaction (via recovery): impossible by Lemma~\ref{lem:skip-safe}, since a $\bot$ certificate implies no transaction was finalized.
+    \item Two different non-$\bot$ transactions finalized via recovery with different tips: impossible by Lemma~\ref{lem:no-conflicting-tip}, since conflicting tips cannot both have $(n-3f)$-certificates.
+\end{enumerate}
+No such disagreement nonce $k$ exists.
+\end{proof}
+
+\subsection{Liveness}
+
+We sketch liveness in two layers: (i) progress when there is no equivocation, and (ii)
+recovery-driven progress for healing clients after equivocation.
+
+\begin{lemma}[Fast-path liveness for non-conflicting transactions]
+\label{lem:fast-path-liveness}
+After GST (partial synchrony), if a client submits a single non-conflicting transaction $tx$ for
+the current nonce, then the client obtains $n - f$ votes within one network round trip (up to
+message delay $\delta$), and the transaction can be finalized.
+\end{lemma}
+
+\begin{proof}
+At least $n - f$ validators are honest and will accept and vote for $tx$
+(Algorithm~\ref{alg:validator-recovery-tx}). Votes are disseminated to the client (and propagated
+among validators), so the client collects $n - f$ votes within one round trip in the synchronous
+period. This matches the standard FastPay ``client collects a quorum of signatures'' pattern.
+\end{proof}
+
+\begin{lemma}[A notarized value always forms for a stuck nonce]
+\label{lem:notarized-forms}
+Assume $n \geq 5f + 1$. For any nonce $k$, if no transaction reaches finality at $k$, then
+eventually an $n - 3f$ notarization certificate forms for either (i) some transaction $tx$ with
+majority support, or (ii) $\bot$.
+\end{lemma}
+
+\begin{proof}
+This is the Simplex-style ``prevent getting stuck'' argument: when parties observe $n - f$ votes
+without any $n - 3f$ certificate, they can safely vote for $\bot$, which guarantees that a
+certificate (possibly for $\bot$) eventually forms.
+
+Our protocol implements this mechanism in Algorithm~\ref{alg:validator-recovery-cert} by triggering
+$\bot$-votes when the max support $q$ inside an $n - f$ certificate is less than $n - 3f$
+(lines~\ref{line:check-no-majority}--\ref{line:sign-bot}).
+\end{proof}
+
+\begin{lemma}[Recovery liveness for healing clients]
+\label{lem:recovery-liveness}
+Let a client be healing, and suppose its account becomes locked due to equivocation at some nonce
+$k$. After the client heals (stops equivocating) and the network is in the synchronous period after
+GST, the client can construct and finalize a recovery transaction within one round trip, thus
+unlocking progress.
+\end{lemma}
+
+\begin{proof}
+By Lemma~\ref{lem:notarized-forms}, for each nonce between the last finalized nonce and the current
+signing nonce, validators can provide either (i) an $n - 3f$ certificate for a transaction with
+majority support, or (ii) an $n - 3f$ certificate for $\bot$. The client collects this information
+(Algorithms~\ref{alg:validator-recovery-rpc} and~\ref{alg:client-recovery}) and constructs a
+recovery transaction $tx_{\mathsf{rec}}$ whose validation requires exactly those certificates
+(Algorithm~\ref{alg:validator-recovery-tx}, \textsc{ValidateRecovery},
+lines~\ref{line:check-tip-cert}--\ref{line:check-bot-cert}).
+
+Once the client broadcasts $tx_{\mathsf{rec}}$, all honest validators accept and vote (it is
+non-conflicting and locally verifiable). The client collects $n - f$ votes and finalizes
+$tx_{\mathsf{rec}}$ within one round trip (Lemma~\ref{lem:fast-path-liveness}). Executing
+$tx_{\mathsf{rec}}$ advances the account state and clears the lock
+(Algorithm~\ref{alg:validator-recovery-cert}), allowing the client to resume normal operation.
+\end{proof}
+
+\begin{theorem}[Liveness for healing clients; responsiveness]
+\label{thm:liveness}
+After GST, the protocol is live for healing clients: any healing client eventually makes progress
+(its nonce advances, and it can continue issuing transactions). Moreover, confirmation remains one
+network round trip in the optimistic case and during recovery, and liveness depends on the actual
+message delay $\delta$ rather than a known bound $\Delta$, i.e., the protocol is responsive.
+\end{theorem}
+
+\begin{proof}
+Combine Lemmas~\ref{lem:fast-path-liveness} and~\ref{lem:recovery-liveness}. The responsiveness
+claim follows the same intuition used in Simplex-style protocols: progress is paced by message
+arrivals, not by waiting for a known $\Delta$.
+\end{proof}
 
 \section{Extending to Other Asynchronous Protocols}
 \label{sec:applicability}

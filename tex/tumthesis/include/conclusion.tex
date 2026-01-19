@@ -1,4 +1,25 @@
-\chapter{Summary and Future Work}
+\chapter{Summary}
 \label{chap:conclusion}
 
-% TODO: Write content
+This thesis addressed a fundamental liveness limitation in asynchronous blockchain protocols: the
+inability to recover from client equivocation without resorting to fallback consensus. We presented
+a fast-path recovery protocol that enables locked accounts to resume transacting while preserving
+the low-latency guarantees that motivate asynchronous execution.
+
+Our key insight is that recovery from client equivocation closely mirrors view change in Byzantine
+consensus protocols. By operating in the $5f+1$ fault model, we ensure that any two $(n-f)$-certificates
+share at least $2f+1$ honest validators, guaranteeing majority support for the same transaction.
+This property enables safe recovery: a client can construct a recovery transaction that references
+the transaction with majority support, and validators can safely advance the account's nonce without
+violating safety.
+
+We gave a concrete construction extending FastPay with an explicit recovery mechanism inspired by
+Simplex-style view change. The protocol handles the full range of equivocation scenarios, including
+cases where no transaction achieves majority support (resolved by signing $\bot$) and recursive
+recovery when recovery transactions themselves conflict. The mechanism is implemented as a special
+recovery contract address, maintaining compatibility with existing Ethereum wallets and tooling.
+
+We implemented a prototype of the protocol, demonstrating the feasibility of the construction.
+The recovery mechanism integrates naturally with the existing FastPay transaction flow, requiring
+only the addition of a recovery contract address and extended certificate handling logic.
+

@@ -1,22 +1,162 @@
 \chapter{Implementation and Evaluation}
 \label{chap:implementation}
 
+We implement a prototype of the recovery protocol to validate the design and demonstrate its
+feasibility. The prototype is written in TypeScript and runs on Node.js, chosen for rapid
+development and the availability of cryptographic libraries. While the prototype is not
+optimized for production use, it faithfully implements the protocol described in
+Chapter~\ref{chap:protocol} and serves as a reference implementation.
+
 \section{System Architecture}
 \label{sec:system-architecture}
 
-% TODO: Write content
+The prototype consists of three main components: validators, clients, and a shared common
+library. Figure~\ref{fig:system-architecture} illustrates the high-level architecture.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    component/.style={draw, rounded corners, minimum width=2.5cm, minimum height=1cm, align=center},
+    arrow/.style={->, thick},
+    label/.style={font=\small}
+]
+
+% Validators
+\node[component] (v1) at (0, 0) {Validator 1};
+\node[component] (v2) at (3.5, 0) {Validator 2};
+\node[component] (v3) at (7, 0) {Validator $n$};
+\node at (5.25, 0) {$\cdots$};
+
+% Client
+\node[component] (client) at (3.5, -3) {Client};
+
+% Arrows
+\draw[arrow, <->] (client) -- (v1) node[midway, left, label] {RPC};
+\draw[arrow, <->] (client) -- (v2) node[midway, right, label] {RPC};
+\draw[arrow, <->] (client) -- (v3) node[midway, right, label] {RPC};
+
+% Validator-to-validator
+\draw[arrow, <->] (v1) -- (v2) node[midway, above, label] {votes};
+\draw[arrow, <->] (v2) -- (v3) node[midway, above, label] {votes};
+
+\end{tikzpicture}
+\caption{System architecture showing validators communicating via vote propagation and clients
+interacting with validators through JSON-RPC.}
+\label{fig:system-architecture}
+\end{figure}
+
+\textbf{Validators.} Each validator runs as an independent HTTP server that exposes a JSON-RPC
+endpoint. Validators maintain local state including account balances, nonces, and collected
+votes. When a validator receives a transaction, it validates the request, signs a vote, and
+broadcasts the vote to all other validators. Validators use the ethers.js library for
+cryptographic operations including transaction parsing, signature verification, and vote signing.
+
+\textbf{Clients.} The client library provides methods for sending transactions and initiating
+recovery. Clients broadcast transactions to all validators in parallel and collect votes from
+the responses. The client verifies each vote signature before counting it toward the quorum.
+For recovery, clients query validators for the current account state and construct a recovery
+transaction referencing an appropriate tip.
+
+\textbf{Common Library.} Shared data structures and utility functions are defined in a common
+module. This includes protocol constants (quorum sizes, recovery contract address), type
+definitions (votes, certificates, account state), and cryptographic utilities (vote verification,
+quorum counting).
 
 \section{Implementation Details}
 \label{sec:implementation-details}
 
-% TODO: Write content
+\textbf{Transaction Format.}
+The prototype uses standard Ethereum transaction format, leveraging the ethers.js library for
+serialization and signature handling. Transactions are serialized as RLP-encoded hex strings
+for network transmission. This design choice provides compatibility with existing Ethereum
+wallets and signing tools, well-tested serialization code, and a familiar transaction structure
+for developers. Recovery transactions are distinguished by their recipient address: the designated
+recovery contract at \texttt{0x0...0100}. The tip transaction is embedded in the \texttt{data}
+field as a serialized transaction, allowing validators to extract and verify it.
+
+\textbf{Vote Structure and Signing.}
+Votes contain five fields: the validator address, account address, nonce, serialized transaction
+(or null for $\bot$), and signature. The signature is computed over a packed encoding of the
+account address, nonce, and transaction hash (or zero hash for $\bot$):
+\[
+\mathsf{message} = \mathsf{keccak256}(\mathsf{account} \| \mathsf{nonce} \| \mathsf{txHash})
+\]
+This scheme allows efficient verification: given a vote, anyone can recover the signer's address
+and verify it matches the claimed validator. Validators verify incoming votes against a known
+validator set to prevent Sybil attacks.
+
+\textbf{State Management.}
+Each validator maintains two mappings: (1) account state, which maps addresses to
+$(\mathsf{balance}, \mathsf{nonce}, \mathsf{pending}, \mathsf{finalised})$ tuples where the
+\texttt{pending} flag indicates whether the account has an in-flight transaction; and (2) vote
+storage, which maps $(\mathsf{address}, \mathsf{nonce})$ pairs to lists of received votes.
+Validators store all votes to support certificate construction and recovery queries. When
+processing votes, validators check for duplicates to prevent double-counting. For normal votes,
+a validator accepts at most one vote per validator per nonce. For $\bot$ votes, the validator
+may receive both a normal vote and a $\bot$ vote from the same validator (if the validator
+initially voted for a transaction but later signed $\bot$ when no transaction achieved
+notarisation quorum).
+
+\textbf{Network Communication.}
+Communication between components uses JSON-RPC over HTTP. The prototype implements three RPC
+methods: \texttt{eth\_sendRawTransaction} to submit a signed transaction and receive the
+validator's vote; \texttt{submitVote} to propagate votes between validators; and
+\texttt{eth\_getRecoveryInfo} to query the validator's view of an account's state including
+the chain of certificates needed for recovery. The naming convention follows Ethereum's
+JSON-RPC API where applicable, facilitating integration with existing tooling.
+
+\textbf{Certificate Handling.}
+Unlike the pseudocode which treats certificates as explicit objects passed between validators,
+the prototype takes a simpler approach: validators implicitly form certificates by collecting
+votes. When a validator accumulates $n-f$ votes for a nonce, it processes the certificate
+inline. This design reduces message complexity---validators only broadcast individual votes,
+not assembled certificates. The \texttt{getMaxQuorumCert} helper function extracts the
+transaction with the most votes from a set of votes, implementing the certificate extraction
+logic from Algorithm~\ref{alg:validator-recovery-cert}.
+
+\textbf{Recovery Flow.}
+The recovery implementation follows the protocol specification. First, the client detects a
+potential lock when a transaction does not achieve finality quorum. The client then queries
+multiple validators for recovery information and selects the response with the highest current
+nonce. From this response, the client identifies the tip transaction: the last non-$\bot$
+transaction in the certificate chain, or the last finalized transaction if all intermediate
+nonces are $\bot$. Finally, the client constructs a recovery transaction with the tip embedded
+in the data field and broadcasts it to collect votes as usual.
 
 \section{Experimental Setup}
 \label{sec:experimental-setup}
 
-% TODO: Write content
+We evaluate the prototype using a local test network with configurable parameters. The default
+configuration uses $n = 6$ validators with $f = 1$ Byzantine fault tolerance, giving a finality
+quorum of $n - f = 5$ and a notarisation quorum of $n - 3f = 3$.
 
-\section{Performance Evaluation}
-\label{sec:performance-evaluation}
+\textbf{Test Scenarios.}
+The test suite validates the protocol through a sequence of scenarios:
 
-% TODO: Write content
+\begin{enumerate}
+    \item \textbf{Normal operation}: A client sends a transaction that achieves finality quorum.
+        All validators vote for the same transaction, the certificate is formed, and the
+        transaction is finalized.
+
+    \item \textbf{Conflicting transactions}: The client (simulating malicious behavior) sends
+        conflicting transactions to different validator subsets. With 6 validators split 3-3,
+        neither transaction achieves the finality quorum of 5, causing the account to lock.
+
+    \item \textbf{Locked account rejection}: While locked, the client attempts a normal
+        transaction at the next nonce. Validators reject this because the account's pending
+        flag is set.
+
+    \item \textbf{Recovery}: The client queries validators for recovery information, constructs
+        a recovery transaction pointing to one of the conflicting transactions (which has
+        notarisation quorum), and successfully recovers the account.
+\end{enumerate}
+
+\textbf{Configuration Parameters.}
+The prototype supports configuration through environment variables:
+\begin{itemize}
+    \item \texttt{N\_VALIDATORS}: Total number of validators (default: 6)
+    \item \texttt{F\_BYZANTINE}: Maximum Byzantine validators (default: 1)
+\end{itemize}
+
+The implementation validates that $n \geq 5f + 1$ at startup, rejecting invalid configurations.
+
