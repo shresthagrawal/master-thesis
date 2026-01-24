@@ -191,32 +191,33 @@ export class ValidatorCore implements IValidator {
 
     existing.push(vote);
 
-    // Check if we have n-f votes for current nonce
-    const acc = this.getAccount(normalized);
-    if (vote.nonce === acc.nonce && existing.length >= FINALITY_QUORUM) {
-      await this.processCertificate(acc, existing);
-    }
+    await this.processCertificate(vote.account, vote.nonce);
   }
 
-  private async processCertificate(acc: AccountState, votes: Vote[]): Promise<void> {
-    const account = votes[0].account.toLowerCase();
-    const nonce = votes[0].nonce;
+  private async processCertificate(account: string, nonce: number): Promise<void> {
+    const acc = this.getAccount(account);
+    const votes = this.getVotes(account, nonce);
     const { quorum, tx } = this.getMaxQuorumCert(votes);
+    let nonceIncremented = false;
 
     // Handle current nonce
     if (nonce === acc.nonce) {
       if (quorum < NOTARISATION_QUORUM) {
-        // No transaction has notarisation quorum - sign bot
-        if (!votes.some((v) => v.validator === this.address && v.serializedTx === null)) {
+        // No transaction has notarisation quorum - try signing bot
+        const alreadyVotedBot = votes.some((v) => v.validator === this.address && v.serializedTx === null);
+        if (votes.length >= FINALITY_QUORUM && !alreadyVotedBot) {
           acc.pending = true;
           const botVote = await this.signVote(account, nonce, null);
           await this.onVote(botVote);
           await this.broadcastVoteCallback(botVote);
         }
-      } else if (acc.pending) {
-        // Notarisation quorum reached - advance nonce
-        acc.nonce = nonce + 1;
-        acc.pending = false;
+      } else {
+        // Notarisation quorum reached - try advancing nonce
+        if (acc.pending) {
+          acc.nonce = nonce + 1;
+          acc.pending = false;
+          nonceIncremented = true;
+        }
       }
     }
 
@@ -232,8 +233,14 @@ export class ValidatorCore implements IValidator {
         if (nonce >= acc.nonce) {
           acc.nonce = nonce + 1;
           acc.pending = false;
+          nonceIncremented = true;
         }
       }
+    }
+
+    // If nonce was incremented, try processing next nonce in case we have votes
+    if (nonceIncremented) {
+      await this.processCertificate(account, acc.nonce);
     }
   }
 

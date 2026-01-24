@@ -228,6 +228,8 @@ state to verify the recovery is valid.
 Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert} present the extended validator
 protocol. Unlike standard FastPay, validators now maintain two separate counters: $\mathsf{nonce}$ tracks the
 next nonce to sign, while $\mathsf{finalised}$ tracks the last finalized nonce (line~\ref{line:account-state}).
+Validators also store all received votes in $\mathsf{votes}[a][k]$ (line~\ref{line:vote-store}) to support
+certificate construction and recovery queries.
 
 When a validator receives a transaction (Algorithm~\ref{alg:validator-recovery-tx}), it first verifies the
 signature (line~\ref{line:verify-sig}) and checks that the account is not pending (line~\ref{line:check-pending})
@@ -236,18 +238,21 @@ and recovery transactions based on the recipient address (line~\ref{line:check-r
 \textsc{ValidatePayment} checks that the previous nonce was finalized (line~\ref{line:check-finalised}) and
 sufficient balance exists (line~\ref{line:check-balance}). For recovery transactions, \textsc{ValidateRecovery}
 verifies that the tip transaction has an $(n-3f)$-certificate (line~\ref{line:check-tip-cert}) and that all
-intermediate nonces have $\bot$ certificates (lines~\ref{line:check-bot-loop}-\ref{line:check-bot-cert}). After
-validation, the validator marks the account as pending (line~\ref{line:set-pending}) and broadcasts its vote
-(line~\ref{line:broadcast-vote}).
+intermediate nonces have $\bot$ certificates (lines~\ref{line:check-bot-loop}--\ref{line:check-bot-cert}). After
+validation, the validator marks the account as pending (line~\ref{line:set-pending}), processes its own vote
+via \textsc{OnVote}, and broadcasts the vote (line~\ref{line:broadcast-vote}).
 
-When a validator receives a certificate (Algorithm~\ref{alg:validator-recovery-cert}), it extracts the
-transaction with maximum quorum support (line~\ref{line:extract-quorum}). If the quorum size is less than
-$n-3f$ (line~\ref{line:check-no-majority}), the validator signs $\bot$ for that nonce (line~\ref{line:sign-bot}),
-signaling that no transaction can be finalized. If the quorum is at least $n-3f$ and the account is pending
-(line~\ref{line:advance-nonce-pending}), the validator advances the nonce. When a certificate has $n-f$ votes
-(line~\ref{line:check-finality}), the validator can safely finalize the transaction and update the finalised counter (line~\ref{line:update-finalised}).
-For recovery transactions, \textsc{GetTxChainStart} (line~\ref{line:get-tx-chain}) follows the chain back to
-the original tip transaction that should be executed.
+When a validator receives a vote (Algorithm~\ref{alg:validator-recovery-cert}, \textsc{OnVote}), it verifies
+the signature (line~\ref{line:verify-vote}), stores the vote, and calls \textsc{ProcessCertificate}
+(line~\ref{line:call-process-cert}). The \textsc{ProcessCertificate} procedure extracts the transaction with
+maximum quorum support (line~\ref{line:extract-quorum}). If $n-f$ votes have been collected but no transaction
+has reached the notarisation quorum of $n-3f$ (line~\ref{line:check-no-majority}), the validator signs $\bot$
+(line~\ref{line:sign-bot}), signaling that no transaction can be finalized at this nonce. If notarisation
+quorum is reached and the account is pending (line~\ref{line:advance-nonce-pending}), the validator advances
+the nonce. When finality quorum of $n-f$ votes is reached (line~\ref{line:check-finality}), the validator
+finalizes the transaction and updates the finalised counter (line~\ref{line:update-finalised}). For recovery
+transactions, \textsc{GetTxChainStart} (line~\ref{line:get-tx-chain}) follows the chain back to the original
+tip transaction that should be executed.
 
 \textbf{Client Protocol.}
 Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{SendTransaction} procedure
@@ -264,6 +269,7 @@ broadcast process as normal transactions.
 \begin{algorithmic}[1]
 \State \textbf{global} $\mathcal{V}$: validator set, $\mathsf{recovery\_contract}$: recovery address
 \State \textbf{state} $\mathsf{account}[\cdot]$: mapping from public key to $(\mathsf{balance}, \mathsf{nonce}, \mathsf{pending}, \mathsf{finalised})$ \label{line:account-state}
+\State \textbf{state} $\mathsf{votes}[\cdot][\cdot]$: mapping from $(a, k)$ to list of votes \label{line:vote-store}
 \Statex
 \Procedure{OnTransaction}{$tx, \sigma$}
     \State \textbf{verify} $\sigma$ is valid signature from $tx.\mathsf{sender}$ on $tx$ \label{line:verify-sig}
@@ -275,13 +281,15 @@ broadcast process as normal transactions.
         \State \Call{ValidatePayment}{$tx$}
     \EndIf
     \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{true}$ \label{line:set-pending}
-    \State broadcast $\langle \mathsf{vote}, tx.\mathsf{sender}, tx.\mathsf{nonce}, tx \rangle_v$ to $\mathcal{V}$ and listening clients \label{line:broadcast-vote}
+    \State $\mathsf{vote} \gets \langle \mathsf{vote}, tx.\mathsf{sender}, tx.\mathsf{nonce}, tx \rangle_v$
+    \State \Call{OnVote}{$\mathsf{vote}$}
+    \State broadcast $\mathsf{vote}$ to $\mathcal{V}$ and listening clients \label{line:broadcast-vote}
 \EndProcedure
 \Statex
 \Procedure{ValidateRecovery}{$tx$}
-    \State $\mathsf{target\_tx} \gets tx.\mathsf{data}.\mathsf{target\_tx}$
-    \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\mathsf{target\_tx}$ at nonce $\mathsf{target\_tx}.\mathsf{nonce}$ \label{line:check-tip-cert}
-    \For{$k \gets \mathsf{target\_tx}.\mathsf{nonce} + 1$ \textbf{to} $tx.\mathsf{nonce} - 1$} \label{line:check-bot-loop}
+    \State $\mathsf{tip} \gets tx.\mathsf{data}.\mathsf{tip}$
+    \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\mathsf{tip}$ at nonce $\mathsf{tip}.\mathsf{nonce}$ \label{line:check-tip-cert}
+    \For{$k \gets \mathsf{tip}.\mathsf{nonce} + 1$ \textbf{to} $tx.\mathsf{nonce} - 1$} \label{line:check-bot-loop}
         \State \textbf{require} $\exists$ $(n-3f)$-certificate for $\bot$ at nonce $k$ \label{line:check-bot-cert}
     \EndFor
 \EndProcedure
@@ -294,20 +302,33 @@ broadcast process as normal transactions.
 \end{algorithm}
 
 \begin{algorithm}[ht]
-\caption{Validator with Recovery - Certificate Handling}\label{alg:validator-recovery-cert}
+\caption{Validator with Recovery - Vote and Certificate Handling}\label{alg:validator-recovery-cert}
 \begin{algorithmic}[1]
-\Procedure{OnCertificate}{$C$}
-    \State \textbf{require} $C$ is valid $(\geq n-f)$-certificate for some nonce $k$
-    \State $(q, tx) \gets \text{max quorum in } C$ \label{line:extract-quorum}
-    \State $a \gets C.\mathsf{account}$
+\Procedure{OnVote}{$\mathsf{vote}$}
+    \State \textbf{verify} $\mathsf{vote}$ has valid signature from validator in $\mathcal{V}$ \label{line:verify-vote}
+    \State $a \gets \mathsf{vote}.\mathsf{account}$; $k \gets \mathsf{vote}.\mathsf{nonce}$
+    \If{vote is non-$\bot$ and validator already voted at $(a, k)$}
+        \State \Return \Comment{each validator votes at most once per nonce}
+    \EndIf
+    \If{vote is $\bot$ and validator already voted $\bot$ at $(a, k)$}
+        \State \Return \Comment{ignore duplicate $\bot$ votes}
+    \EndIf
+    \State append $\mathsf{vote}$ to $\mathsf{votes}[a][k]$
+    \State \Call{ProcessCertificate}{$a, k$} \label{line:call-process-cert}
+\EndProcedure
+\Statex
+\Procedure{ProcessCertificate}{$a, k$} \label{line:process-cert}
+    \State $(q, tx) \gets \text{max quorum in } \mathsf{votes}[a][k]$ \label{line:extract-quorum}
     \Statex
     \If{$k = \mathsf{account}[a].\mathsf{nonce}$}
-        \If{$q < n - 3f$} \label{line:check-no-majority}
-            \Comment{no full quorum for $k$}
+        \If{$q < n - 3f$ \textbf{and} $|\mathsf{votes}[a][k]| \geq n - f$ \textbf{and} not voted $\bot$} \label{line:check-no-majority}
+            \Comment{no notarisation quorum but have $n-f$ votes}
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{true}$
-            \State broadcast $\langle \mathsf{vote}, a, k, \bot \rangle_v$ to $\mathcal{V}$ \label{line:sign-bot}
-        \ElsIf{$\mathsf{account}[a].\mathsf{pending}$} \label{line:advance-nonce-pending}
-            \Comment{update nonce and pending}
+            \State $\mathsf{vote}_\bot \gets \langle \mathsf{vote}, a, k, \bot \rangle_v$ \label{line:sign-bot}
+            \State \Call{OnVote}{$\mathsf{vote}_\bot$}
+            \State broadcast $\mathsf{vote}_\bot$ to $\mathcal{V}$
+            \State \Return
+        \ElsIf{$q \geq n - 3f$ \textbf{and} $\mathsf{account}[a].\mathsf{pending}$} \label{line:advance-nonce-pending}
             \State $\mathsf{account}[a].\mathsf{nonce} \gets k + 1$
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{false}$
         \EndIf
@@ -315,7 +336,6 @@ broadcast process as normal transactions.
     \Statex
     \If{$q \geq n - f$ \textbf{and} $k > \mathsf{account}[a].\mathsf{finalised}$ \textbf{and} $tx \neq \bot$} \label{line:check-finality}
         \State $tx_{\mathsf{orig}} \gets \Call{GetTxChainStart}{tx}$ \label{line:get-chain-start}
-        \Comment{original tx must be same as finalized or next (+1)}
         \If{$tx_{\mathsf{orig}}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised}$ \textbf{or} $tx_{\mathsf{orig}}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
             \If{$tx_{\mathsf{orig}}.\mathsf{nonce} = \mathsf{account}[a].\mathsf{finalised} + 1$}
                 \State \Call{ExecuteTransfer}{$tx_{\mathsf{orig}}$} \label{line:execute-transfer}
@@ -328,9 +348,9 @@ broadcast process as normal transactions.
         \EndIf
     \EndIf
     \Statex
-    \Comment{process current nonce if certificate exists}
-    \If{$\exists$ certificate $C'$ for nonce $\mathsf{account}[a].\mathsf{nonce}$}
-        \State \Call{OnCertificate}{$C'$}
+    \Comment{recursively process next nonce}
+    \If{nonce was incremented}
+        \State \Call{ProcessCertificate}{$a, \mathsf{account}[a].\mathsf{nonce}$}
     \EndIf
 \EndProcedure
 \Statex
