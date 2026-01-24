@@ -1,10 +1,10 @@
 \chapter{Conclusions, Limitations, and Future Work}
 \label{chap:conclusion}
-\za{this section needs work: you need to add all the limitations, practical considerations, assumptions that could be improved, and speculations on how, which you leave as future work.}
-This thesis addressed a fundamental liveness limitation in asynchronous blockchain protocols: the
+
+This thesis addressed a fundamental liveness limitation in consensusless blockchain protocols: the
 inability to recover from client equivocation without resorting to fallback consensus. We presented
 a fast-path recovery protocol that enables locked accounts to resume transacting while preserving
-the low-latency guarantees that motivate asynchronous execution.
+the low-latency guarantees that motivate consensusless execution.
 
 Our key insight is that recovery from client equivocation closely mirrors view change in Byzantine
 consensus protocols. By operating in the $5f+1$ fault model, we ensure that any two $(n-f)$-certificates
@@ -22,4 +22,20 @@ recovery contract address, maintaining compatibility with existing Ethereum wall
 We implemented a prototype of the protocol, demonstrating the feasibility of the construction.
 The recovery mechanism integrates naturally with the existing FastPay transaction flow, requiring
 only the addition of a recovery contract address and extended certificate handling logic.
+
+\section{Limitations}
+
+\textbf{Expressiveness.} Consensusless protocols, including ours, are inherently limited to single-writer state or commutative (CRDT-like) operations. Applications requiring non-commutative multi-writer state - such as shared accounts or atomic swaps between independent parties - still require consensus or similar coordination mechanisms. Our recovery protocol does not change this fundamental expressiveness boundary.
+
+\textbf{Protocol complexity.} Recovery adds complexity to the base protocol. Validators must store votes to support recovery queries, increasing storage overhead. The recovery transaction validation logic is more involved than standard payment validation, and clients must implement additional logic to detect locks and construct recovery transactions.
+
+\textbf{Healing client assumption.} Our liveness guarantees apply only to healing clients - those that eventually stop equivocating. Permanently Byzantine clients that continue to equivocate indefinitely are not guaranteed to make progress. This is inherent to the consensusless setting: without consensus, there is no mechanism to force progress for adversarial clients.
+
+\section{Future Work}
+
+\textbf{Reducing the fault threshold.} Our protocol requires $5f+1$ validators, tolerating up to 20\% Byzantine faults, compared to $3f+1$ for standard FastPay which tolerates up to 33\%. Similar to the original Simplex construction which operates in the $3f+1$ model, it is possible to reduce the fault threshold at the cost of an additional round trip during recovery. Exploring this tradeoff between adversarial resilience and recovery latency is an interesting direction for future work.
+
+\textbf{Optimizing vote storage.} Validators currently store all votes to support recovery queries. Techniques such as vote aggregation, garbage collection of old nonces, or cryptographic accumulators could reduce storage overhead while preserving recovery functionality.
+
+\textbf{Production deployment.} Recovery from client equivocation is one key problem for deploying consensusless protocols, but several other challenges remain. These include validator set changes (reconfiguration), gas cost and pricing mechanisms to protect against denial-of-service attacks, state synchronization and efficient state reading for new or recovering validators, and light client support for resource-constrained devices. Addressing these challenges is necessary for practical adoption of consensusless protocols.
 

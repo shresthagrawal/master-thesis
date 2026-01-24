@@ -41,6 +41,8 @@ We assume a Byzantine adversary controlling up to $f$ validators. We write:
 
 Honest parties follow the protocol as specified. Byzantine parties may deviate arbitrarily (including equivocation, selective message dropping, or sending conflicting messages).
 
+We distinguish two client behaviors: \emph{honest clients} follow the protocol, while \emph{Byzantine clients} may deviate arbitrarily. Under relaxed termination (Section~\ref{sec:termination-tradeoff}), Byzantine clients that introduce conflicts are not guaranteed liveness-the protocol may halt progress for that client's state. Safety is preserved unconditionally, but liveness is sacrificed in the presence of conflicts.
+
 We assume static corruption: the adversary chooses which parties to corrupt at the beginning of execution and can coordinate all corrupted parties.
 
 \textbf{Network model and responsiveness.}
@@ -73,7 +75,7 @@ signed by the sender. Intuitively:
     \item \textsf{data} encodes optional call data (e.g., smart contract inputs).
 \end{itemize}
 
-In account-based blockchains, if \textsf{data} is empty, the transaction is treated as a simple transfer; otherwise, it invokes code at the recipient address. In this thesis we focus on FastPay-style payments, and therefore assume $\textsf{data} = \emptyset$ in the concrete construction (Chapter~\ref{chap:protocol}). Later, we discuss how the recovery intuition extends to other asynchronous protocols, including those with single-writer contract-like state.
+In account-based blockchains, if \textsf{data} is empty, the transaction is treated as a simple transfer; otherwise, it invokes code at the recipient address. In this thesis we focus on FastPay-style payments, and therefore assume $\textsf{data} = \emptyset$ in the concrete construction (Chapter~\ref{chap:protocol}). Later, we discuss how the recovery intuition extends to other consensusless protocols, including those with single-writer contract-like state.
 
 \textbf{Precompiled contracts.}
 In Ethereum and compatible blockchains, \emph{precompiled contracts} (or \emph{precompiles}) are special addresses
@@ -89,7 +91,7 @@ A traditional blockchain maintains a global ledger
 \[
 L = (tx_1, tx_2, \ldots),
 \]
-a totally ordered sequence of transactions intended to represent the system's history over time.
+a totally ordered sequence of transactions intended to represent the system's history over time. We write $L \preceq L'$ to denote that $L$ is a prefix of $L'$, and $L \sim L'$ if $L \preceq L'$ or $L' \preceq L$.
 
 At the core of most blockchain protocols is a consensus protocol that continuously takes transactions from a mempool, totally orders them, and outputs an ever-growing ledger. Given a deterministic state transition function $F$ (a ``virtual machine'' or state machine), validators apply state machine replication~\cite{smr}: starting from a common genesis state $S_0$, each validator iteratively computes
 \[
@@ -97,12 +99,21 @@ S_{t+1} = F(S_t, tx_{t+1}).
 \]
 If all honest validators execute the same ordered ledger, they compute the same state (and thus the same state root) at each step.
 
-\za{Why are the consensus properties not here? The title says consensus, but it's not defined here. Maybe you need safety and liveness of SMR, as you have defined the ledgers based on the SMR definitions, and below in the next section you literally mention safety and liveness.}
+\textbf{SMR safety and liveness.}
+A state machine replication protocol must satisfy two properties.
 
-\section{Asynchronous Protocols}
-\label{sec:async-protocols}
+\begin{definition}[Ledger Safety]
+A ledger is safe iff for any two honest parties $P_1, P_2$, for all rounds $r_1, r_2$, $L_{P_1}^{r_1} \sim L_{P_2}^{r_2}$ holds.
+\end{definition}
 
-In this thesis, we use \emph{asynchronous protocols} to mean protocols that avoid global consensus and total ordering, not necessarily protocols that assume a fully asynchronous network. The key idea is that many workloads do not require a globally agreed total order to be safely executed. \za{NO!!!!! You cannot do this, its a very bad idea. Name them consensusless!!!!!!!!}
+\begin{definition}[Ledger Liveness]
+A protocol satisfies liveness with parameter $u$ if, when an honest party $P$ submits a transaction $tx$ at round $r$, the transaction must appear in any honest party's view of the ledger $L_{P'}^{r'}$ by round $r'$, where $r' \geq r + u$.
+\end{definition}
+
+\section{Consensusless Protocols}
+\label{sec:consensusless-protocols}
+
+In this thesis, we use \emph{consensusless protocols} to mean protocols that avoid global consensus and total ordering. The key idea is that many workloads do not require a globally agreed total order to be safely executed.
 
 \textbf{Payments without total order.}
 The original motivation for blockchains was Byzantine fault-tolerant payments. However, it has been shown that global payments can be supported without solving consensus: it is sufficient to ensure local ordering for each sender and to restrict state updates so that conflicts are avoided~\cite{consensus-number}. Intuitively, independent transfers (e.g., Alice$\rightarrow$Bob and Charlie$\rightarrow$Dave) do not interact, and reordering them yields the same final state.
@@ -117,101 +128,18 @@ The main non-commutative edge case arises from overspending. Subtractions are no
 \textbf{Consensus number intuition.}
 Payments can avoid consensus because validity checks for spending can be made locally by the spender. An honest client can ensure a new transfer does not underflow given its confirmed deposits and outgoing payments. Other parties can increase a client's balance but cannot decrease it. This asymmetry is why cryptocurrency-like objects have consensus number 1~\cite{consensus-number}.
 
-\textbf{Why async protocols are fast.}
+\textbf{Why consensusless protocols are fast.}
 Avoiding consensus eliminates multiple rounds of validator-to-validator coordination. As a concrete data point, FastPay~\cite{fastpay} reports intra-continental confirmation latency below 100ms and throughput above 80,000 transactions per second with 20 authorities in controlled experiments.
 
 For comparison, consensus protocols-even highly optimized modern ones-require multiple message rounds to commit. For example, HotStuff-style protocols~\cite{hotstuff} commit through multiple phases (often described as three round trips in the baseline design). Recent DAG-based consensus protocols reduce latency and can reach very high throughput, but they still solve a global ordering problem and therefore incur additional coordination; Mysticeti-C~\cite{mysticeti} reports WAN commit latency around 0.5s while sustaining over 200k TPS.
 
-Async protocols also enable horizontal scalability because execution can be sharded by object/account: disjoint state can be processed in parallel across machines, a property emphasized in FastPay's design.
+Consensusless protocols also enable horizontal scalability because execution can be sharded by object/account: disjoint state can be processed in parallel across machines, a property emphasized in FastPay's design.
 
-\section{FastPay Protocol Overview}
-\label{sec:fastpay-overview}
-
-\za{this is a building block, unlike the other sections, which are definitional. We need to either make another section "building blocks" or find some way to make it work in this section.}
-We now describe a simplified version of the FastPay protocol~\cite{fastpay} that forms the basis for our recovery construction. FastPay is a Byzantine fault-tolerant payment system that achieves confirmation in a single round trip without requiring consensus among validators. The standard protocol operates with $n \geq 3f + 1$ validators, where $f$ is the maximum number of Byzantine validators. Our recovery extension (Chapter~\ref{chap:protocol}) requires the stronger assumption $n \geq 5f + 1$ to ensure safe recovery from equivocation.
-
-\textbf{Certificates and quorums.}
-A \emph{vote} is a signed message $\langle \mathsf{vote}, a, k, m \rangle_v$ from validator $v$, where $a$ is an account, $k$ is a nonce, and $m$ is either a transaction $tx$ or the symbol $\bot$.
-
-A \emph{$q$-certificate} for account $a$ at nonce $k$ is a set of at least $q$ votes from distinct validators on the same $(a, k)$ pair (votes may be for different messages). A \emph{$q$-quorum certificate} (or simply $q$-quorum) is a $q$-certificate where all votes are for the same message $m$.
-
-We use two quorum thresholds:
-\begin{itemize}
-    \item \textbf{Finality threshold:} $n - f$. A transaction with an $(n-f)$-quorum is \emph{finalized}.
-    \item \textbf{Notarization threshold:} $n - 3f$. A transaction with an $(n-3f)$-quorum is \emph{notarized}. This weaker threshold is used for recovery (Chapter~\ref{chap:protocol}).
-\end{itemize}
-
-\textbf{Equivocation.}
-A party \emph{equivocates} at $(a, k)$ if it signs two different non-$\bot$ messages for the same account $a$ and nonce $k$. Honest validators never equivocate. Byzantine validators and clients may equivocate arbitrarily.
-
-\textbf{Validator protocol.}
-Algorithm~\ref{alg:validator} shows the simplified validator logic.
-
-\begin{algorithm}[h]
-\caption{Honest Validator}\label{alg:validator}
-\begin{algorithmic}[1]
-\State \textbf{global} $\mathcal{V}$: validator set
-\State \textbf{state} $\mathsf{account}[\cdot]$: mapping from client public key to $(\mathsf{balance}, \mathsf{nonce}, \mathsf{pending})$
-\Statex
-\Procedure{OnTransaction}{$tx, \sigma$}
-    \State \textbf{verify} $\sigma$ is a valid signature from $tx.\mathsf{sender}$ on $tx$
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} = \mathsf{false}$
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} = tx.\mathsf{nonce}$
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \geq tx.\mathsf{amount}$
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{true}$
-    \State broadcast $\langle \mathsf{vote}, tx \rangle_v$ to $\mathcal{V}$ and listening clients
-\EndProcedure
-\Statex
-\Procedure{OnCertificate}{$tx, C$}
-    \State \textbf{require} $C$ is a valid $(n-f)$-quorum on $tx$
-    \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} = tx.\mathsf{nonce}$
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{false}$
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} \gets \mathsf{nonce} + 1$
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$
-    \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\textbf{Client protocol.}
-Algorithm~\ref{alg:client} shows the simplified client logic.
-
-\begin{algorithm}[h]
-\caption{Honest Client}\label{alg:client}
-\begin{algorithmic}[1]
-\State \textbf{global} $\mathcal{V}$: validator set
-\State \textbf{state} $\mathsf{nonce}$: local transaction sequence number
-\Statex
-\Procedure{SendTransaction}{$\mathsf{to}, \mathsf{amount}$}
-    \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \bot)$
-    \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
-    \State broadcast $(tx, \langle tx \rangle_{\mathsf{self}})$ to $\mathcal{V}$
-    \State wait for $n - f$ valid votes \Comment{certificate formed by validators}
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\textbf{Transaction flow.}
-A transaction proceeds in three phases:
-\begin{enumerate}
-    \item \textbf{Validation.} The client constructs a transaction, signs it, and broadcasts it to all validators. Each validator checks that (i) the signature is valid, (ii) no transaction is currently pending for this account, (iii) the nonce matches the expected value, and (iv) the balance is sufficient. If all checks pass, the validator sets the pending flag and broadcasts its signed vote to all validators and listening clients.
-    \item \textbf{Confirmation.} Once the client observes $n - f$ votes, the transaction is considered finalized, even though the state has not yet been updated. This is the confirmation latency of the protocol: $2\delta$ or one network round trip (client to validators and back).
-    \item \textbf{Execution.} Validators assemble votes into a certificate and broadcast it. Upon receiving a valid certificate, validators execute the transaction: they clear the pending flag, increment the nonce, and update balances.
-\end{enumerate}
-
-\textbf{Note on vote dissemination.}
-Unlike the original FastPay paper where clients assemble and broadcast certificates, we have validators broadcast votes to all validators and listening clients. This simplifies client logic without affecting safety or liveness.
-
-\textbf{Safety.}
-Safety relies on the fact that each validator votes for at most one transaction per nonce (enforced by the pending flag and nonce check). Since $n \geq 3f + 1$, any two $(n-f)$-quorums must intersect in at least $(n - f) + (n - f) - n = n - 2f \geq f + 1$ validators. With at most $f$ Byzantine validators, any two quorums share at least one honest validator. An honest validator only votes once per nonce, so two conflicting certificates for the same nonce cannot both exist. This ensures that conflicting transactions cannot both be finalized.
-
-\textbf{Liveness.}
-Liveness holds for honest clients that do not equivocate. If a client sends a single transaction for each nonce, it will eventually collect $n - f$ votes (since at least $n - f$ validators are honest and will respond). The client can then form a certificate and finalize the transaction. Critically, if a client sends conflicting transactions for the same nonce, different validators may vote for different transactions, and neither may reach $n - f$ votes - the account becomes locked.
-
-\section{Expressiveness and Client Types}
-\label{sec:expressiveness}
+\section{The Termination Tradeoff}
+\label{sec:termination-tradeoff}
 \za{is this section necessary? do you use these definitions later? the point of this section is to expose the things you need and will prove later. One set of defintions, either SMR or consensus is enough, unless you use the consensus defintions to prove SMR.}
-To better understand the tradeoffs made by asynchronous protocols, it is helpful to start from the classical definition of single-shot consensus.
+\sa{I have moved most of the other stuff from this section elsewhere (expressiveness classes to related work, client types to system model, permanent locking to FastPay chapter). I find this relaxation of termination condition provides good theoretical understanding. Should we move it to an appendix or somewhere else?}
+To better understand the tradeoffs made by consensusless protocols, it is helpful to start from the classical definition of single-shot consensus.
 
 \textbf{Single-shot consensus.}
 In a single-shot consensus instance, parties must decide on a single value (e.g., one proposal among potentially conflicting candidates).
@@ -228,7 +156,7 @@ A protocol solves Byzantine consensus if it satisfies:
 The key point is that termination is unconditional: progress must occur even under conflicts. This coordination requirement is a primary contributor to the latency and throughput costs of consensus-backed blockchains.
 
 \textbf{Relaxed termination.}
-Asynchronous protocols improve performance by weakening termination: instead of requiring progress under arbitrary conflicts, they require progress only when there is no conflict~\cite{abc}.
+Consensusless protocols improve performance by weakening termination: instead of requiring progress under arbitrary conflicts, they require progress only when there is no conflict~\cite{abc}.
 
 \begin{definition}[Consensus with Relaxed Termination~\cite{abc}]
 A protocol satisfies relaxed consensus if it provides:
@@ -239,29 +167,16 @@ A protocol satisfies relaxed consensus if it provides:
 \end{itemize}
 \end{definition}
 
-This relaxation is the core semantic tradeoff: the protocol remains safe under conflicts, but may stop making progress on conflicting state. This naturally leads to an expressiveness boundary - which kinds of replicated state can be updated without creating conflicts? We organize state updates into three broad classes:
-\begin{enumerate}
-    \item \textbf{Commutative multi-writer state (CRDT-like).} If all updates commute, the system can safely apply them in any order and still converge. A simple example is a balance that supports deposits only: two deposits of $+5$ and $+7$ commute, so regardless of order, the final balance increases by $12$. This is closely related to Conflict-Free Replicated Data Types (CRDTs)~\cite{crdt}, where concurrent updates can be merged deterministically without coordination.
-
-    \item \textbf{Non-commutative single-writer state.} Some updates do not commute, but conflicts can be avoided if each object has a single writer that imposes a local order on its own updates. A canonical example is a balance that supports withdrawals: the success of a withdrawal depends on the order of previous withdrawals due to the non-negativity constraint. With a single writer, conflicts can be prevented by ensuring the writer never issues competing updates for the same sequence position. Under relaxed termination, liveness is guaranteed only as long as the writer behaves correctly.
-
-    \item \textbf{Non-commutative multi-writer state.} If multiple independent writers can issue non-commutative updates to the same object, conflicts can arise even when all writers are honest. For example, if two parties can concurrently withdraw from the same balance-constrained state, the decision of which withdrawal succeeds depends on ordering and cannot be resolved by local reasoning. This class requires stronger synchronization and is precisely where consensus-like power reappears~\cite{consensus-number}.
-\end{enumerate}
-
-\textbf{Honest vs Byzantine clients.}
-We distinguish two client behaviors: \emph{honest clients} follow the protocol, while \emph{Byzantine clients} may deviate arbitrarily. Under relaxed termination, Byzantine clients that introduce conflicts are not guaranteed liveness - the protocol may halt progress for that client's state. This is a fundamental limitation: safety is preserved unconditionally, but liveness is sacrificed in the presence of conflicts. \za{this should only be part of the adversarial model in the preliminaries, it has no place here. merge or delete if already mentioned}
-
-\textbf{Permanent locking from equivocation.}
-Client equivocation leads to permanent loss of liveness. Consider a client that broadcasts two conflicting transactions $tx$ and $tx'$ with the same nonce. With $n = 3f + 1$ validators, suppose $f + 1$ honest validators vote for $tx$ and $f$ honest validators vote for $tx'$ (the remaining $f$ are Byzantine). The client can collect at most $2f + 1$ votes for $tx$ and at most $3f$ votes for $tx'$. If Byzantine validators split their votes or abstain, neither transaction reaches the $(n-f)$-quorum required for finality. The account is now \emph{locked}: the pending flag is set at all honest validators, no certificate can be formed, and no future transaction with a higher nonce can proceed.
+This relaxation is the core semantic tradeoff: the protocol remains safe under conflicts, but may stop making progress on conflicting state.
 
 \section{Healing Clients and Recovery}
 \label{sec:healing-clients}
 
-The lack of liveness under conflicts is often described as a limitation affecting only malicious clients. In practice, however, conflict behavior can occur naturally due to benign faults and common wallet behavior, making it a significant obstacle to deploying asynchronous protocols in production.
+The lack of liveness under conflicts is often described as a limitation affecting only malicious clients. In practice, however, conflict behavior can occur naturally due to benign faults and common wallet behavior, making it a significant obstacle to deploying consensusless protocols in production.
 
-First, it is common in existing blockchain ecosystems for wallets to intentionally reuse the same nonce to replace or cancel a pending transaction-for example, by reissuing an otherwise empty transfer with a higher fee so that the new transaction supersedes the old one in the mempool. This technique is a routine part of user experience in account-based systems. In an asynchronous protocol that relies on local ordering, the same behavior becomes equivocation: different validators may observe different transactions for the same nonce, which can lead to a permanent lock under existing designs.
+First, it is common in existing blockchain ecosystems for wallets to intentionally reuse the same nonce to replace or cancel a pending transaction-for example, by reissuing an otherwise empty transfer with a higher fee so that the new transaction supersedes the old one in the mempool. This technique is a routine part of user experience in account-based systems. In a consensusless protocol that relies on local ordering, the same behavior becomes equivocation: different validators may observe different transactions for the same nonce, which can lead to a permanent lock under existing designs.
 
-Second, many widely deployed wallets are effectively stateless. A typical workflow is: wake up, query a full node for the latest nonce, construct a transaction, sign, and send-without persisting additional state beyond the private key. In a synchronous blockchain with a globally ordered ledger, this is often sufficient: the chain defines the canonical nonce progression. In asynchronous protocols, this becomes problematic. If a wallet crashes after sending a transaction but before persisting the used nonce (or before learning which validators observed it), the wallet may later resend with the same nonce, unintentionally equivocating. Preventing this would require wallets to implement a non-equivocation gadget-e.g., durable local storage and crash-recovery logic that ensures a nonce is never reused-which begins to resemble the operational complexity of validator setups. This breaks composability with existing wallet infrastructure and significantly raises the bar for adoption.
+Second, many widely deployed wallets are effectively stateless. A typical workflow is: wake up, query a full node for the latest nonce, construct a transaction, sign, and send-without persisting additional state beyond the private key. In a synchronous blockchain with a globally ordered ledger, this is often sufficient: the chain defines the canonical nonce progression. In consensusless protocols, this becomes problematic. If a wallet crashes after sending a transaction but before persisting the used nonce (or before learning which validators observed it), the wallet may later resend with the same nonce, unintentionally equivocating. Preventing this would require wallets to implement a non-equivocation gadget-e.g., durable local storage and crash-recovery logic that ensures a nonce is never reused-which begins to resemble the operational complexity of validator setups. This breaks composability with existing wallet infrastructure and significantly raises the bar for adoption.
 
 This thesis addresses precisely this practical gap: enabling robust progress for clients that may equivocate due to benign faults, without requiring wallets to become stateful or to implement sophisticated non-equivocation mechanisms.
 

@@ -109,7 +109,7 @@ JSON-RPC API where applicable, facilitating integration with existing tooling.
 Unlike the pseudocode which treats certificates as explicit objects passed between validators,
 the prototype takes a simpler approach: validators implicitly form certificates by collecting
 votes. When a validator accumulates $n-f$ votes for a nonce, it processes the certificate
-inline. This design reduces message complexity---validators only broadcast individual votes,
+inline. This design reduces message complexity-validators only broadcast individual votes,
 not assembled certificates. The \texttt{getMaxQuorumCert} helper function extracts the
 transaction with the most votes from a set of votes, implementing the certificate extraction
 logic from Algorithm~\ref{alg:validator-recovery-cert}.
