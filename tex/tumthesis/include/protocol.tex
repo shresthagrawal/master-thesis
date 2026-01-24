@@ -407,7 +407,7 @@ certificates, and selects the one with the highest nonce to use as the recovery 
 
 \section{Safety and Liveness Arguments}
 \label{sec:safety-liveness}
-
+\za{this should be a separate section called Security Analysis}
 We state safety as a \emph{per-account common prefix} property: for each sender account $a$, validators maintain a local view of a chain of finalized actions indexed by the sender's nonce. Safety means that honest validators never disagree about this per-account chain.
 
 \subsection{Per-Account Finalized Chain}
@@ -479,9 +479,10 @@ Consider the first nonce $k$ where two honest validators disagree. Disagreement 
 \end{enumerate}
 No such disagreement nonce $k$ exists.
 \end{proof}
+\za{this should have a corollary that say that the above gives you the SMR safty defintions that needs to be added in your Sec.2! }
 
 \subsection{Liveness}
-
+\za{Add intuition above lemmas, saying below we prove that XXX..before every lemma so one can skip the lemmas if they want to and still know wha toyu do.}
 We sketch liveness in two layers: (i) progress when there is no equivocation, and (ii)
 recovery-driven progress for healing clients after equivocation.
 
@@ -553,6 +554,7 @@ Combine Lemmas~\ref{lem:fast-path-liveness} and~\ref{lem:recovery-liveness}. The
 claim follows the same intuition used in Simplex-style protocols: progress is paced by message
 arrivals, not by waiting for a known $\Delta$.
 \end{proof}
+\za{is this what you promised in section 2 that you will prove? there needs to be a mapping.}
 
 \section{Extending to Other Asynchronous Protocols}
 \label{sec:applicability}
@@ -569,3 +571,5 @@ of updating balances (line~\ref{line:execute-transfer}), validators execute the 
 based on the finalized transaction. The protocol guarantees a consistent chain of transactions per account,
 ensuring that all validators arrive at the same account state.
 
+
+\za{this section is a bit weak, as everything so far is properly defined and here we claim an extension. its ok for now, i jsut leave the comment in case we have more time. its NOT a priority.}

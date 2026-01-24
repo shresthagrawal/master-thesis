@@ -97,10 +97,12 @@ S_{t+1} = F(S_t, tx_{t+1}).
 \]
 If all honest validators execute the same ordered ledger, they compute the same state (and thus the same state root) at each step.
 
+\za{Why are the consensus properties not here? The title says consensus, but it's not defined here. Maybe you need safety and liveness of SMR, as you have defined the ledgers based on the SMR definitions, and below in the next section you literally mention safety and liveness.}
+
 \section{Asynchronous Protocols}
 \label{sec:async-protocols}
 
-In this thesis, we use \emph{asynchronous protocols} to mean protocols that avoid global consensus and total ordering, not necessarily protocols that assume a fully asynchronous network. The key idea is that many workloads do not require a globally agreed total order to be safely executed.
+In this thesis, we use \emph{asynchronous protocols} to mean protocols that avoid global consensus and total ordering, not necessarily protocols that assume a fully asynchronous network. The key idea is that many workloads do not require a globally agreed total order to be safely executed. \za{NO!!!!! You cannot do this, its a very bad idea. Name them consensusless!!!!!!!!}
 
 \textbf{Payments without total order.}
 The original motivation for blockchains was Byzantine fault-tolerant payments. However, it has been shown that global payments can be supported without solving consensus: it is sufficient to ensure local ordering for each sender and to restrict state updates so that conflicts are avoided~\cite{consensus-number}. Intuitively, independent transfers (e.g., Alice$\rightarrow$Bob and Charlie$\rightarrow$Dave) do not interact, and reordering them yields the same final state.
@@ -125,6 +127,7 @@ Async protocols also enable horizontal scalability because execution can be shar
 \section{FastPay Protocol Overview}
 \label{sec:fastpay-overview}
 
+\za{this is a building block, unlike the other sections, which are definitional. We need to either make another section "building blocks" or find some way to make it work in this section.}
 We now describe a simplified version of the FastPay protocol~\cite{fastpay} that forms the basis for our recovery construction. FastPay is a Byzantine fault-tolerant payment system that achieves confirmation in a single round trip without requiring consensus among validators. The standard protocol operates with $n \geq 3f + 1$ validators, where $f$ is the maximum number of Byzantine validators. Our recovery extension (Chapter~\ref{chap:protocol}) requires the stronger assumption $n \geq 5f + 1$ to ensure safe recovery from equivocation.
 
 \textbf{Certificates and quorums.}
@@ -207,7 +210,7 @@ Liveness holds for honest clients that do not equivocate. If a client sends a si
 
 \section{Expressiveness and Client Types}
 \label{sec:expressiveness}
-
+\za{is this section necessary? do you use these definitions later? the point of this section is to expose the things you need and will prove later. One set of defintions, either SMR or consensus is enough, unless you use the consensus defintions to prove SMR.}
 To better understand the tradeoffs made by asynchronous protocols, it is helpful to start from the classical definition of single-shot consensus.
 
 \textbf{Single-shot consensus.}
@@ -246,7 +249,7 @@ This relaxation is the core semantic tradeoff: the protocol remains safe under c
 \end{enumerate}
 
 \textbf{Honest vs Byzantine clients.}
-We distinguish two client behaviors: \emph{honest clients} follow the protocol, while \emph{Byzantine clients} may deviate arbitrarily. Under relaxed termination, Byzantine clients that introduce conflicts are not guaranteed liveness - the protocol may halt progress for that client's state. This is a fundamental limitation: safety is preserved unconditionally, but liveness is sacrificed in the presence of conflicts.
+We distinguish two client behaviors: \emph{honest clients} follow the protocol, while \emph{Byzantine clients} may deviate arbitrarily. Under relaxed termination, Byzantine clients that introduce conflicts are not guaranteed liveness - the protocol may halt progress for that client's state. This is a fundamental limitation: safety is preserved unconditionally, but liveness is sacrificed in the presence of conflicts. \za{this should only be part of the adversarial model in the preliminaries, it has no place here. merge or delete if already mentioned}
 
 \textbf{Permanent locking from equivocation.}
 Client equivocation leads to permanent loss of liveness. Consider a client that broadcasts two conflicting transactions $tx$ and $tx'$ with the same nonce. With $n = 3f + 1$ validators, suppose $f + 1$ honest validators vote for $tx$ and $f$ honest validators vote for $tx'$ (the remaining $f$ are Byzantine). The client can collect at most $2f + 1$ votes for $tx$ and at most $3f$ votes for $tx'$. If Byzantine validators split their votes or abstain, neither transaction reaches the $(n-f)$-quorum required for finality. The account is now \emph{locked}: the pending flag is set at all honest validators, no certificate can be formed, and no future transaction with a higher nonce can proceed.
