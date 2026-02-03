@@ -99,17 +99,6 @@ S_{t+1} = F(S_t, tx_{t+1}).
 \]
 If all honest validators execute the same ordered ledger, they compute the same state (and thus the same state root) at each step.
 
-\textbf{SMR safety and liveness.}
-A state machine replication protocol must satisfy two properties.
-
-\begin{definition}[Ledger Safety]
-A ledger is safe iff for any two honest parties $P_1, P_2$, for all rounds $r_1, r_2$, $L_{P_1}^{r_1} \sim L_{P_2}^{r_2}$ holds.
-\end{definition}
-
-\begin{definition}[Ledger Liveness]
-A protocol satisfies liveness with parameter $u$ if, when an honest party $P$ submits a transaction $tx$ at round $r$, the transaction must appear in any honest party's view of the ledger $L_{P'}^{r'}$ by round $r'$, where $r' \geq r + u$.
-\end{definition}
-
 \section{Consensusless Protocols}
 \label{sec:consensusless-protocols}
 
@@ -187,3 +176,30 @@ A client is \emph{healing} if it may deviate arbitrarily for some period of time
 \end{definition}
 
 Our recovery protocol (Chapter~\ref{chap:protocol}) provides liveness for healing clients: even if a client previously equivocated and became locked, once it ``heals'' it can safely recover and continue making progress. Importantly, the goal is not to restore unconditional termination for permanently Byzantine clients; a client that continues to equivocate indefinitely is not guaranteed to recover. Instead, we aim for a practical guarantee: benign faults should not permanently brick an account, and recovery should be possible without fallback consensus or new wallet-side infrastructure.
+
+\section{Security Properties}
+\label{sec:security-properties}
+
+We restrict attention to \emph{payment} transactions (transfers) as in FastPay-style
+protocols: a sender authorizes a transfer of an amount to a recipient using a per-sender
+nonce for sequencing (cf.\ Sections~\ref{sec:transactions-ledgers}--\ref{sec:termination-tradeoff}).
+The first three properties below - safety, authenticity, and liveness - are inherited from
+FastPay~\cite{fastpay}. Our contribution is the fourth: relaxing the liveness condition to
+healing clients via the recovery mechanism.
+
+\begin{property}[Safety]
+\label{prop:safety}
+For every balance transition induced by a confirmed transfer,
+$\mathsf{Total}(\mathsf{bal}) = \sum_a \mathsf{bal}(a)$ is invariant: the protocol
+never creates or destroys value.
+\end{property}
+
+\begin{property}[Authenticity]
+\label{prop:authenticity}
+Only the owner of an account may transfer value out of the account.
+\end{property}
+
+\begin{property}[Liveness]
+\label{prop:liveness}
+An honest client or a healed client can always transfer funds from its account.
+\end{property}

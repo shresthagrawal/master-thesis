@@ -225,7 +225,7 @@ recovery transactions do not transfer value. Validators look up the required cer
 state to verify the recovery is valid.
 
 \textbf{Validator Protocol.}
-Algorithms~\ref{alg:validator-recovery-tx} and~\ref{alg:validator-recovery-cert} present the extended validator
+Algorithms~\ref{alg:validator-recovery-tx},~\ref{alg:validator-recovery-vote}, and~\ref{alg:validator-recovery-cert} present the extended validator
 protocol. Unlike standard FastPay, validators now maintain two separate counters: $\mathsf{nonce}$ tracks the
 next nonce to sign, while $\mathsf{finalised}$ tracks the last finalized nonce (line~\ref{line:account-state}).
 Validators also store all received votes in $\mathsf{votes}[a][k]$ (line~\ref{line:vote-store}) to support
@@ -242,7 +242,7 @@ intermediate nonces have $\bot$ certificates (lines~\ref{line:check-bot-loop}--\
 validation, the validator marks the account as pending (line~\ref{line:set-pending}), processes its own vote
 via \textsc{OnVote}, and broadcasts the vote (line~\ref{line:broadcast-vote}).
 
-When a validator receives a vote (Algorithm~\ref{alg:validator-recovery-cert}, \textsc{OnVote}), it verifies
+When a validator receives a vote (Algorithm~\ref{alg:validator-recovery-vote}, \textsc{OnVote}), it verifies
 the signature (line~\ref{line:verify-vote}), stores the vote, and calls \textsc{ProcessCertificate}
 (line~\ref{line:call-process-cert}). The \textsc{ProcessCertificate} procedure extracts the transaction with
 maximum quorum support (line~\ref{line:extract-quorum}). If $n-f$ votes have been collected but no transaction
@@ -302,7 +302,7 @@ broadcast process as normal transactions.
 \end{algorithm}
 
 \begin{algorithm}[ht]
-\caption{Validator with Recovery - Vote and Certificate Handling}\label{alg:validator-recovery-cert}
+\caption{Validator with Recovery - Vote Handling}\label{alg:validator-recovery-vote}
 \begin{algorithmic}[1]
 \Procedure{OnVote}{$\mathsf{vote}$}
     \State \textbf{verify} $\mathsf{vote}$ has valid signature from validator in $\mathcal{V}$ \label{line:verify-vote}
@@ -316,7 +316,12 @@ broadcast process as normal transactions.
     \State append $\mathsf{vote}$ to $\mathsf{votes}[a][k]$
     \State \Call{ProcessCertificate}{$a, k$} \label{line:call-process-cert}
 \EndProcedure
-\Statex
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[ht]
+\caption{Validator with Recovery - Certificate Processing}\label{alg:validator-recovery-cert}
+\begin{algorithmic}[1]
 \Procedure{ProcessCertificate}{$a, k$} \label{line:process-cert}
     \State $(q, tx) \gets \text{max quorum in } \mathsf{votes}[a][k]$ \label{line:extract-quorum}
     \Statex

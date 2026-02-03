@@ -72,14 +72,74 @@ Consider the first nonce $k$ where two honest validators disagree. Disagreement 
 \end{enumerate}
 No such disagreement nonce $k$ exists.
 \end{proof}
-\za{this should have a corollary that say that the above gives you the SMR safty defintions that needs to be added in your Sec.2! }
+
+We now connect the per-account common prefix to the payment properties stated in
+Section~\ref{sec:security-properties}.
+
+\begin{lemma}[Conservation of value (S1)]
+\label{lem:s1-conservation}
+Assume $n \ge 5f+1$ and that all honest validators start from the same initial balances.
+Let $\mathsf{bal}_i$ denote the balance mapping maintained by an honest validator $v_i$ at any time.
+Then the total value is invariant:
+\[
+\sum_{a} \mathsf{bal}_i(a) \;=\; \sum_{a} \mathsf{bal}_i^{(0)}(a),
+\]
+i.e., the protocol does not create or destroy money; it only transfers value between accounts.
+\end{lemma}
+
+\begin{proof}
+By Theorem~\ref{thm:safety}, for each sender account $a$ there is a single well-defined finalized chain
+(common prefix) that honest validators extend, so honest validators never diverge on which
+(non-$\bot$) payments are finalized for any sender nonce.
+
+It remains to observe that every state transition that changes balances is value-preserving.
+Inspect Algorithm~\ref{alg:validator-recovery-cert}: the only operation that updates balances is \textsc{ExecuteTransfer}
+(line~\ref{line:execute-transfer}), which subtracts $\mathsf{amt}$ from the sender and adds the same $\mathsf{amt}$
+to the recipient. Thus each executed payment preserves the sum of all balances.
+Skipping a nonce using $\bot$ does not update balances, and recovery transactions have amount
+zero and only serve to select and/or execute an underlying payment via $\textsc{GetTxChainStart}$.
+Therefore, by induction over the sequence of executed transfers at $v_i$, the global sum of balances
+at $v_i$ is invariant and equals its initial value.
+Since all honest validators start from the same initial balances, the total money supply is fixed
+system-wide.
+\end{proof}
+
+\begin{lemma}[Authenticity / authorized spending (S2)]
+\label{lem:s2-authenticity}
+If an honest validator executes a payment transaction $\mathsf{tx}$ that debits sender $s$,
+then $\mathsf{tx}$ is authorized by $s$ (i.e., it carries a valid signature under $s$'s public key),
+except with negligible probability.
+\end{lemma}
+
+\begin{proof}
+A payment is executed only via Algorithm~\ref{alg:validator-recovery-cert} when finality is reached
+(line~\ref{line:check-finality}) and the executed
+transaction is the start of the referenced chain $\mathsf{tx}_{\mathit{orig}}=\textsc{GetTxChainStart}(\cdot)$
+(line~\ref{line:get-chain-start}),
+which is either a direct payment or a payment referenced by a recovery transaction.
+In either case, the payment must have accumulated votes from validators before it can be executed
+(either directly by finality, or indirectly because recovery validation requires certificates about the
+referenced tip and intermediate nonces in Algorithm~\ref{alg:validator-recovery-tx}).
+
+Honest validators vote only after verifying the sender signature on the transaction
+(Algorithm~\ref{alg:validator-recovery-tx}, line~\ref{line:verify-sig}). Any quorum certificate contains at least one honest validator signature,
+hence the executed payment must have passed signature verification at an honest validator.
+Under EUF-CMA security, this implies the payment was authorized by the sender, except with
+negligible probability.
+\end{proof}
 
 \section{Liveness}
 
-We sketch liveness in two layers: (i) progress when there is no equivocation, and (ii)
-recovery-driven progress for healing clients after equivocation.
+We prove the payment liveness property stated in Section~\ref{sec:security-properties}:
+after GST, any client that is (i) honest, or (ii) healing and has healed (i.e., it eventually
+stops equivocating), can always transfer funds. Concretely, such a client can obtain a
+finality certificate for valid payments, possibly after first issuing a recovery transaction
+if its account is locked. Permanently Byzantine clients that keep equivocating forever are
+not guaranteed to make progress.
 
-\textbf{Fast-path progress.} We first show that non-equivocating clients make progress within one round trip. Intuitively, if a client sends a single transaction for a nonce, all honest validators will vote for it, and the client will be able to collect enough votes to finalize.
+The proof decomposes into: (1) fast-path progress for non-conflicting transactions, and
+(2) recovery progress that restores the ability to make non-conflicting progress after
+equivocation.
 
 \begin{lemma}[Fast-path liveness for non-conflicting transactions]
 \label{lem:fast-path-liveness}
@@ -140,14 +200,36 @@ $tx_{\mathsf{rec}}$ advances the account state and clears the lock
 (Algorithm~\ref{alg:validator-recovery-cert}), allowing the client to resume normal operation.
 \end{proof}
 
-\textbf{Main liveness result.} Combining the above, we conclude that healing clients always make progress and that the protocol remains responsive - confirmation depends on actual network delay, not on a known upper bound.
+\begin{corollary}[Payment liveness for honest and healed clients]
+\label{cor:merged-liveness}
+After GST, any honest client, and any healing client after it has healed, can always transfer
+funds: for any valid payment it wishes to issue, it can obtain an $(n-f)$ finality certificate.
+Moreover, if the account is not locked, confirmation takes one network round trip; if the
+account is locked, one recovery round trip suffices to unlock the account, after which the
+payment confirms in one additional round trip.
+\end{corollary}
 
-\begin{theorem}[Liveness for healing clients; responsiveness]
+\begin{proof}
+Fix a client $a$ after GST.
+
+If $a$'s account is not locked (i.e., the client submits a single non-conflicting transaction
+for its current nonce), then the payment is confirmed within one network round trip by
+Lemma~\ref{lem:fast-path-liveness}.
+
+If $a$'s account is locked due to past equivocation, and $a$ is healing and has healed, then
+Lemma~\ref{lem:recovery-liveness} guarantees that $a$ can construct and finalize a recovery transaction within one
+network round trip, which clears the lock and advances progress. After that, the client can
+submit a non-conflicting payment for its current nonce, which is confirmed within one
+network round trip by Lemma~\ref{lem:fast-path-liveness}.
+\end{proof}
+
+\begin{theorem}[Liveness for honest and healed clients; responsiveness]
 \label{thm:liveness}
-After GST, the protocol is live for healing clients: any healing client eventually makes progress
-(its nonce advances, and it can continue issuing transactions). Moreover, confirmation remains one
-network round trip in the optimistic case and during recovery, and liveness depends on the actual
-message delay $\delta$ rather than a known bound $\Delta$, i.e., the protocol is responsive.
+After GST, the protocol is live for honest clients and for healing clients after they have
+healed: such clients can always make progress and continue issuing payments. Moreover,
+confirmation remains one network round trip in the optimistic case and during recovery,
+and liveness depends on the actual message delay $\delta$ rather than a known bound $\Delta$,
+i.e., the protocol is responsive.
 \end{theorem}
 
 \begin{proof}
@@ -155,4 +237,3 @@ Combine Lemmas~\ref{lem:fast-path-liveness} and~\ref{lem:recovery-liveness}. The
 claim follows the same intuition used in Simplex-style protocols: progress is paced by message
 arrivals, not by waiting for a known $\Delta$.
 \end{proof}
-\za{is this what you promised in section 2 that you will prove? there needs to be a mapping.}
