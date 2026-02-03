@@ -1,4 +1,6 @@
 \chapter{Background and Preliminaries}
+
+\fp{$\square$ Add more information about CRDTs in this chapter.}
 \label{chap:background}
 
 \section{Cryptographic Primitives}
@@ -31,6 +33,9 @@ Validators (called authorities in FastPay~\cite{fastpay}) maintain the protocol 
 
 \textbf{Clients.}
 Clients are the users of the protocol. They create and submit transactions. Each client has a fixed public/private key pair $(pk, sk)$ and is identified by its unique public key.
+
+\textbf{Accounts and balances.}
+Let $\mathcal{A}$ be the set of accounts. Each account is owned by a client and is identified by the client's public key. The protocol state includes a balance function $\mathsf{bal} : \mathcal{A} \rightarrow \mathbb{N}$. We assume an initial state $\mathsf{bal}_0$ where all balances are non-negative.
 
 \textbf{Adversary model.}
 We assume a Byzantine adversary controlling up to $f$ validators. We write:
@@ -75,7 +80,7 @@ signed by the sender. Intuitively:
     \item \textsf{data} encodes optional call data (e.g., smart contract inputs).
 \end{itemize}
 
-In account-based blockchains, if \textsf{data} is empty, the transaction is treated as a simple transfer; otherwise, it invokes code at the recipient address. In this thesis we focus on FastPay-style payments, and therefore assume $\textsf{data} = \emptyset$ in the concrete construction (Chapter~\ref{chap:protocol}). Later, we discuss how the recovery intuition extends to other consensusless protocols, including those with single-writer contract-like state.
+In account-based blockchains, if \textsf{data} is empty, the transaction is treated as a simple transfer; otherwise, it invokes code at the recipient address. In this thesis we focus on FastPay-style payments, and therefore assume $\textsf{data} = \emptyset$ in the concrete construction (Chapter~\ref{chap:protocol}). A \emph{payment transaction} is thus a transaction of the form $tx = (\textsf{sender}, \textsf{recipient}, \textsf{amount}, \textsf{nonce})$, transferring \textsf{amount} from the sender's account to the recipient's account. Later, we discuss how the recovery intuition extends to other consensusless protocols, including those with single-writer contract-like state.
 
 \textbf{Precompiled contracts.}
 In Ethereum and compatible blockchains, \emph{precompiled contracts} (or \emph{precompiles}) are special addresses
@@ -123,40 +128,6 @@ Avoiding consensus eliminates multiple rounds of validator-to-validator coordina
 For comparison, consensus protocols-even highly optimized modern ones-require multiple message rounds to commit. For example, HotStuff-style protocols~\cite{hotstuff} commit through multiple phases (often described as three round trips in the baseline design). Recent DAG-based consensus protocols reduce latency and can reach very high throughput, but they still solve a global ordering problem and therefore incur additional coordination; Mysticeti-C~\cite{mysticeti} reports WAN commit latency around 0.5s while sustaining over 200k TPS.
 
 Consensusless protocols also enable horizontal scalability because execution can be sharded by object/account: disjoint state can be processed in parallel across machines, a property emphasized in FastPay's design.
-
-\section{The Termination Tradeoff}
-\label{sec:termination-tradeoff}
-\za{is this section necessary? do you use these definitions later? the point of this section is to expose the things you need and will prove later. One set of defintions, either SMR or consensus is enough, unless you use the consensus defintions to prove SMR.}
-\sa{I have moved most of the other stuff from this section elsewhere (expressiveness classes to related work, client types to system model, permanent locking to FastPay chapter). I find this relaxation of termination condition provides good theoretical understanding. Should we move it to an appendix or somewhere else?}
-To better understand the tradeoffs made by consensusless protocols, it is helpful to start from the classical definition of single-shot consensus.
-
-\textbf{Single-shot consensus.}
-In a single-shot consensus instance, parties must decide on a single value (e.g., one proposal among potentially conflicting candidates).
-
-\begin{definition}[Single-shot Consensus]
-A protocol solves Byzantine consensus if it satisfies:
-\begin{itemize}
-    \item \textbf{Agreement.} No two honest parties decide different values.
-    \item \textbf{Validity.} If all honest parties start with the same value $v$, then $v$ is the only value that can be decided by honest parties.
-    \item \textbf{Termination.} Every honest party eventually decides some value.
-\end{itemize}
-\end{definition}
-
-The key point is that termination is unconditional: progress must occur even under conflicts. This coordination requirement is a primary contributor to the latency and throughput costs of consensus-backed blockchains.
-
-\textbf{Relaxed termination.}
-Consensusless protocols improve performance by weakening termination: instead of requiring progress under arbitrary conflicts, they require progress only when there is no conflict~\cite{abc}.
-
-\begin{definition}[Consensus with Relaxed Termination~\cite{abc}]
-A protocol satisfies relaxed consensus if it provides:
-\begin{itemize}
-    \item \textbf{Agreement.} No two honest parties decide different values.
-    \item \textbf{Validity.} If all honest parties start with the same value $v$, then $v$ is the only value that can be decided by honest parties.
-    \item \textbf{No-conflict termination.} If every honest party observes non-conflicting transactions (informally, there exists a unique ``consistent'' value to decide), then every honest party eventually decides.
-\end{itemize}
-\end{definition}
-
-This relaxation is the core semantic tradeoff: the protocol remains safe under conflicts, but may stop making progress on conflicting state.
 
 \section{Healing Clients and Recovery}
 \label{sec:healing-clients}
