@@ -1,9 +1,35 @@
 \chapter{Appendix}
 \label{chap:appendix}
 
-This is the appendix.
-Remove the appendix if it is empty.
+\section{The Termination Tradeoff}
+\label{sec:termination-tradeoff}
 
-\section{Appendix section}
+To better understand the tradeoffs made by consensusless protocols, it is helpful to start from the classical definition of single-shot consensus.
 
-The appendix can contain different sections.
+\textbf{Single-shot consensus.}
+In a single-shot consensus instance, parties must decide on a single value (e.g., one proposal among potentially conflicting candidates).
+
+\begin{definition}[Single-shot Consensus]
+A protocol solves Byzantine consensus if it satisfies:
+\begin{itemize}
+    \item \textbf{Agreement.} No two honest parties decide different values.
+    \item \textbf{Validity.} If all honest parties start with the same value $v$, then $v$ is the only value that can be decided by honest parties.
+    \item \textbf{Termination.} Every honest party eventually decides some value.
+\end{itemize}
+\end{definition}
+
+The key point is that termination is unconditional: progress must occur even under conflicts. This coordination requirement is a primary contributor to the latency and throughput costs of consensus-backed blockchains.
+
+\textbf{Relaxed termination.}
+Consensusless protocols improve performance by weakening termination: instead of requiring progress under arbitrary conflicts, they require progress only when there is no conflict~\cite{abc}.
+
+\begin{definition}[Consensus with Relaxed Termination~\cite{abc}]
+A protocol satisfies relaxed consensus if it provides:
+\begin{itemize}
+    \item \textbf{Agreement.} No two honest parties decide different values.
+    \item \textbf{Validity.} If all honest parties start with the same value $v$, then $v$ is the only value that can be decided by honest parties.
+    \item \textbf{No-conflict termination.} If every honest party observes non-conflicting transactions (informally, there exists a unique ``consistent'' value to decide), then every honest party eventually decides.
+\end{itemize}
+\end{definition}
+
+This relaxation is the core semantic tradeoff: the protocol remains safe under conflicts, but may stop making progress on conflicting state.
