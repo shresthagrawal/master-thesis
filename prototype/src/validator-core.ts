@@ -8,8 +8,7 @@ import {
   ValidatorInfo,
   GenesisAccount,
   IValidator,
-  FINALITY_QUORUM,
-  NOTARISATION_QUORUM,
+  F_BYZANTINE,
   RECOVERY_CONTRACT,
   countQuorum,
   verifyVote,
@@ -24,21 +23,31 @@ export type BroadcastVoteCallback = (vote: Vote) => void | Promise<void>;
 
 export class ValidatorCore implements IValidator {
   public readonly address: string;
+  public readonly finalityQuorum: number;
+  public readonly notarisationQuorum: number;
   private wallet: ethers.Wallet;
   private validatorSet: Set<string>;
   private accounts: { [address: string]: AccountState } = {};
   private voteStore: { [address: string]: { [nonce: number]: Vote[] } } = {};
   private broadcastVoteCallback: BroadcastVoteCallback;
+  private skipVerification: boolean;
 
   constructor(
     privateKey: string,
     validators: ValidatorInfo[],
     genesisAccounts: GenesisAccount[] = [],
-    broadcastVote: BroadcastVoteCallback = () => {}
+    broadcastVote: BroadcastVoteCallback = () => {},
+    fByzantine: number = F_BYZANTINE,
+    skipVerification: boolean = false
   ) {
     this.wallet = new ethers.Wallet(privateKey);
     this.address = this.wallet.address;
     this.broadcastVoteCallback = broadcastVote;
+    this.skipVerification = skipVerification;
+
+    const n = validators.length;
+    this.finalityQuorum = n - fByzantine;
+    this.notarisationQuorum = n - 3 * fByzantine;
 
     // Store validator set
     this.validatorSet = new Set(validators.map((v) => v.address.toLowerCase()));
@@ -117,10 +126,19 @@ export class ValidatorCore implements IValidator {
     account.pending = true;
 
     const vote = await this.signVote(sender, tx.nonce, tx);
-    await this.onVote(vote);
+    // Store own vote directly (skip signature verification — we just signed it)
+    this.storeVote(vote);
+    await this.processCertificate(vote.account, vote.nonce);
     await this.broadcastVoteCallback(vote);
 
     return vote;
+  }
+
+  private storeVote(vote: Vote): void {
+    const normalized = vote.account.toLowerCase();
+    if (!this.voteStore[normalized]) this.voteStore[normalized] = {};
+    if (!this.voteStore[normalized][vote.nonce]) this.voteStore[normalized][vote.nonce] = [];
+    this.voteStore[normalized][vote.nonce].push(vote);
   }
 
   private validatePayment(tx: Transaction): void {
@@ -148,14 +166,14 @@ export class ValidatorCore implements IValidator {
 
     // Verify tip has notarisation quorum
     const tipVotes = this.getVotes(sender, tipTx.nonce);
-    if (countQuorum(tipVotes, tipTx.hash!) < NOTARISATION_QUORUM) {
+    if (countQuorum(tipVotes, tipTx.hash!) < this.notarisationQuorum) {
       throw new Error("Tip transaction doesn't have notarisation quorum");
     }
 
     // Verify all intermediate nonces have bot certificates
     for (let k = tipTx.nonce + 1; k < tx.nonce; k++) {
       const kVotes = this.getVotes(sender, k);
-      if (countQuorum(kVotes, null) < NOTARISATION_QUORUM) {
+      if (countQuorum(kVotes, null) < this.notarisationQuorum) {
         throw new Error(`Intermediate nonce ${k} missing bot certificate`);
       }
     }
@@ -163,7 +181,7 @@ export class ValidatorCore implements IValidator {
 
   async onVote(vote: Vote): Promise<void> {
     // Verify vote signature and validator set membership
-    if (!verifyVote(vote, this.validatorSet)) {
+    if (!this.skipVerification && !verifyVote(vote, this.validatorSet)) {
       throw new Error("Invalid vote signature or validator not in set");
     }
 
@@ -202,10 +220,10 @@ export class ValidatorCore implements IValidator {
 
     // Handle current nonce
     if (nonce === acc.nonce) {
-      if (quorum < NOTARISATION_QUORUM) {
+      if (quorum < this.notarisationQuorum) {
         // No transaction has notarisation quorum - try signing bot
         const alreadyVotedBot = votes.some((v) => v.validator === this.address && v.serializedTx === null);
-        if (votes.length >= FINALITY_QUORUM && !alreadyVotedBot) {
+        if (votes.length >= this.finalityQuorum && !alreadyVotedBot) {
           acc.pending = true;
           const botVote = await this.signVote(account, nonce, null);
           await this.onVote(botVote);
@@ -222,7 +240,7 @@ export class ValidatorCore implements IValidator {
     }
 
     // Handle finality (n-f quorum)
-    if (quorum >= FINALITY_QUORUM && nonce > acc.finalised && tx !== null) {
+    if (quorum >= this.finalityQuorum && nonce > acc.finalised && tx !== null) {
       const originalTx = this.getTxChainStart(tx);
       // Original tx must be same as finalized or next (+1)
       if (originalTx.nonce === acc.finalised || originalTx.nonce === acc.finalised + 1) {
@@ -270,7 +288,7 @@ export class ValidatorCore implements IValidator {
     let cf: Certificate | null = null;
     if (kf >= 0) {
       const votes = this.getVotes(account, kf);
-      const { tx, cert } = this.getMaxQuorumCert(votes, FINALITY_QUORUM);
+      const { tx, cert } = this.getMaxQuorumCert(votes, this.finalityQuorum);
       if (tx && cert) {
         serializedFinalisedTx = tx.serialized;
         cf = cert;
@@ -281,7 +299,7 @@ export class ValidatorCore implements IValidator {
     const chain: ChainEntry[] = [];
     for (let k = kf + 1; k < kn; k++) {
       const votes = this.getVotes(account, k);
-      const { tx, cert } = this.getMaxQuorumCert(votes, NOTARISATION_QUORUM);
+      const { tx, cert } = this.getMaxQuorumCert(votes, this.notarisationQuorum);
       if (!cert) {
         throw new Error(`Missing notarisation certificate at nonce ${k}`);
       }
@@ -323,7 +341,8 @@ export class ValidatorCore implements IValidator {
 export function createValidatorCores(
   count: number,
   genesisAccounts: GenesisAccount[] = [],
-  autoBroadcast: boolean = false
+  autoBroadcast: boolean = false,
+  fByzantine: number = F_BYZANTINE
 ): { validators: ValidatorCore[]; validatorInfos: ValidatorInfo[] } {
   const validatorInfos: ValidatorInfo[] = [];
   const privateKeys: string[] = [];
@@ -341,7 +360,7 @@ export function createValidatorCores(
 
   const validators: ValidatorCore[] = [];
   for (let i = 0; i < count; i++) {
-    validators.push(new ValidatorCore(privateKeys[i], validatorInfos, genesisAccounts));
+    validators.push(new ValidatorCore(privateKeys[i], validatorInfos, genesisAccounts, () => {}, fByzantine));
   }
 
   // Optionally wire up vote broadcasting between validators

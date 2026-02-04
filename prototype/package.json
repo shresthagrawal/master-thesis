@@ -6,7 +6,12 @@
   "scripts": {
     "build": "tsc",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
-    "demo": "tsx demo.ts"
+    "demo": "tsx demo.ts",
+    "bench1": "tsx benchmark.ts bench1 classic && tsx benchmark.ts bench1 recovery",
+    "bench2": "tsx benchmark.ts bench2 classic && tsx benchmark.ts bench2 recovery",
+    "bench3": "tsx benchmark.ts bench3 recovery",
+    "bench:all": "npm run bench1 && npm run bench2 && npm run bench3",
+    "plots": "tsx generate-plots.ts"
   },
   "dependencies": {
     "ethers": "^6.9.0"

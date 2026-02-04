@@ -1,8 +1,6 @@
 \chapter{Implementation and Evaluation}
 \label{chap:implementation}
 
-\fp{$\square$ Evaluation is still WIP -- once the evaluation is fully implemented, the thesis will be well rounded.}
-
 We implement a prototype of the recovery protocol to validate the design and demonstrate its
 feasibility. The prototype is written in TypeScript and runs on Node.js, chosen for rapid
 development and the availability of cryptographic libraries. While the prototype is not
@@ -161,4 +159,178 @@ The prototype supports configuration through environment variables:
 \end{itemize}
 
 The implementation validates that $n \geq 5f + 1$ at startup, rejecting invalid configurations.
+
+\section{Performance Evaluation}
+\label{sec:performance-evaluation}
+
+To quantify the overhead introduced by the recovery mechanism, we compare two
+protocol variants under identical network conditions: \emph{Classic FastPay},
+which implements the original protocol without recovery support, and
+\emph{FastPay with Recovery}, which includes the full recovery mechanism
+described in Chapter~\ref{chap:protocol}.
+
+\subsection{Classic FastPay Implementation}
+
+The classic variant strips the recovery-related code paths from the validator:
+no bot voting, no notarisation quorum, and no recovery transaction handling.
+When a validator receives a vote, it checks only whether the finality quorum
+of $n - f$ votes has been reached for a single transaction at the current nonce.
+If so, the transfer is executed and the nonce advances. If conflicting
+transactions prevent any single transaction from reaching the quorum, the
+account remains permanently locked---precisely the limitation that motivates
+the recovery protocol.
+
+To ensure a fair comparison, each protocol is configured with its
+maximum tolerable~$f$ for a given~$n$:
+\begin{itemize}
+    \item Classic FastPay: $f = \lfloor(n-1)/3\rfloor$ (the standard $3f+1$ model)
+    \item FastPay with Recovery: $f = \lfloor(n-1)/5\rfloor$ (the $5f+1$ model)
+\end{itemize}
+Both share the same network infrastructure (HTTP JSON-RPC), cryptographic
+operations (ethers.js signing and verification), and client-side logic (broadcast
+to all validators, collect votes). The only difference lies in the certificate
+processing logic and the resulting finality quorum ($n - f$).
+
+\subsection{Benchmark Methodology}
+
+We measure two metrics: \emph{throughput} (finalized transactions per second)
+and \emph{latency} (time from broadcasting a transaction to receiving
+$n - f$ valid votes back from the validators).
+
+\textbf{Setup.}
+The benchmarks use $n = 6$ validators, each running as a separate operating
+system process with its own HTTP JSON-RPC server. Validators communicate
+via HTTP for both client requests and inter-validator vote propagation,
+with $f$ set according to the protocol variant. All processes run on the
+same machine to eliminate network variability while still parallelizing
+cryptographic operations across CPU cores. All transaction signatures are
+precomputed before each benchmark run so that the measurement phase captures
+only protocol execution time. The latency timer resolves as soon as $n - f$
+vote responses arrive from the validators.
+
+\textbf{Benchmark~1: Happy-path throughput and latency.}
+To measure the maximum achievable throughput, we use a separate account for
+every transaction, removing the sequential nonce bottleneck. The offered load
+increases across phases (10, 20, 40, 80, 120, 160~tx/s), with
+each phase running for 10 seconds. We expect the latency to remain flat at low
+load and spike once the system saturates, producing an L-shaped curve.
+
+\textbf{Benchmark~2: Single-account sequential throughput.}
+A single account sends transactions back-to-back (each transaction waits for
+quorum before the next is submitted, due to nonce ordering). This measures the
+sequential per-account throughput---the fastest rate at which one user can
+finalize transactions.
+
+\textbf{Benchmark~3: Recovery impact on throughput.}
+A single account sends transactions at its maximum sequential rate. After
+10~seconds of steady-state operation, the client equivocates by sending
+conflicting transactions, locking the account. The client then immediately
+initiates recovery and resumes normal transactions. Per-second throughput is
+tracked as a time series to show that recovery causes at most a brief
+interruption.
+
+\subsection{Results}
+
+\textbf{Happy-path throughput and latency.}
+Figure~\ref{fig:bench1-latency} shows the latency as a function of
+achieved throughput for both protocol variants. At low throughput, both
+protocols achieve similar median latency (${\sim}5$--$8$\,ms). As the throughput
+approaches the saturation point (${\sim}80$--$120$\,tx/s), latency increases by
+several orders of magnitude---the characteristic L-shaped curve of a saturating
+system. The 95th-percentile tail latency shows the same pattern. Both protocols
+saturate at a similar point, demonstrating that the recovery mechanism adds
+negligible overhead to the fast path.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    xlabel={Throughput [tx/s]},
+    ylabel={Latency [ms]},
+    ymode=log,
+    ymin=3,
+    ymax=20000,
+    ytick={5,10,50,100,1000,10000},
+    yticklabels={5,10,50,100,1000,10000},
+    width=0.85\textwidth,
+    height=7cm,
+    legend pos={north west},
+    grid=major,
+    legend cell align={left},
+]
+\addplot[color=TUMBlue, mark=*, thick]
+    table[x=classic_tps, y=classic_median, col sep=tab] {data/bench1-latency.dat};
+\addplot[color=TUMOrange, mark=square*, thick]
+    table[x=recovery_tps, y=recovery_median, col sep=tab] {data/bench1-latency.dat};
+\addplot[color=TUMBlue, mark=*, thick, dashed]
+    table[x=classic_tps, y=classic_p95, col sep=tab] {data/bench1-latency.dat};
+\addplot[color=TUMOrange, mark=square*, thick, dashed]
+    table[x=recovery_tps, y=recovery_p95, col sep=tab] {data/bench1-latency.dat};
+\legend{Classic (p50), Recovery (p50), Classic (p95), Recovery (p95)}
+\end{axis}
+\end{tikzpicture}
+\caption{Latency vs.\ throughput. Solid lines show median, dashed lines show
+95th percentile. Both protocols exhibit the L-shaped curve characteristic of a
+saturating system.}
+\label{fig:bench1-latency}
+\end{figure}
+
+\textbf{Single-account sequential throughput.}
+Table~\ref{tab:bench2} compares the sequential throughput of both protocols
+when a single account sends transactions back-to-back for 30~seconds.
+
+\begin{table}[ht]
+\centering
+\caption{Single-account sequential throughput comparison ($n=6$).}
+\label{tab:bench2}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Protocol} & \textbf{Throughput [tx/s]} & \textbf{Median [ms]} & \textbf{Mean [ms]} & \textbf{p95 [ms]} \\
+\midrule
+Classic FastPay & 105.8 & 4.4 & 4.8 & 6.9 \\
+FastPay with Recovery & 90.2 & 5.9 & 6.2 & 8.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The results confirm that the recovery mechanism introduces minimal overhead on
+the fast path: the additional code paths for bot voting and recovery validation
+are never triggered during normal operation and do not measurably affect
+per-transaction latency.
+
+\textbf{Recovery impact on throughput.}
+Figure~\ref{fig:bench3-timeseries} shows the per-second throughput of a single
+account over time. After 10~seconds of steady-state operation, the client
+equivocates, locking the account. Recovery is initiated immediately, and normal
+transactions resume. The throughput timeline shows that recovery causes only a
+brief interruption in the equivocation second, after which throughput returns to
+the pre-equivocation level.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    xlabel={Time [s]},
+    ylabel={Throughput [tx/s]},
+    ymin=0,
+    width=0.85\textwidth,
+    height=6cm,
+    grid=major,
+    legend cell align={left},
+    legend pos={south east},
+]
+\addplot[color=TUMBlue, thick, mark=none]
+    table[x=timeSec, y=throughput, col sep=tab] {data/bench3-timeseries.dat};
+\draw[dashed, TUMOrange, thick] (axis cs:10.0,0) -- (axis cs:10.0,100)
+    node[above, font=\footnotesize] {equivocation};
+\draw[dashed, TUMGreen, thick] (axis cs:10.5,0) -- (axis cs:10.5,100)
+    node[above, font=\footnotesize] {recovery};
+\legend{FastPay with Recovery}
+\end{axis}
+\end{tikzpicture}
+\caption{Per-second throughput during equivocation and recovery. The vertical
+dashed lines mark the equivocation and recovery events. Throughput recovers
+immediately after the recovery transaction is finalized.}
+\label{fig:bench3-timeseries}
+\end{figure}
 

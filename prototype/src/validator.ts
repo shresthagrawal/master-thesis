@@ -7,7 +7,6 @@ import {
   JsonRpcRequest,
   JsonRpcResponse,
   IValidator,
-  AccountState,
   RecoveryInfo,
 } from "./common.js";
 import { ValidatorCore } from "./validator-core.js";
@@ -15,18 +14,23 @@ import { ValidatorCore } from "./validator-core.js";
 export type { ValidatorInfo, GenesisAccount };
 export { ValidatorCore, createValidatorCores } from "./validator-core.js";
 
+// Any validator core that supports broadcast setup
+export type ValidatorWithBroadcast = IValidator & {
+  setBroadcastCallback(cb: (vote: Vote) => void | Promise<void>): void;
+};
+
 type RpcHandler = (params: unknown[]) => Promise<unknown> | unknown;
 
-// Network wrapper around ValidatorCore - exposes HTTP JSON-RPC server
+// Network wrapper around any IValidator core - exposes HTTP JSON-RPC server
 export class ValidatorServer {
-  public readonly core: ValidatorCore;
+  public readonly core: ValidatorWithBroadcast;
   public readonly host: string;
   public readonly port: number;
   private rpcHandlers: { [method: string]: RpcHandler } = {};
   private peers: ValidatorInfo[] = [];
 
   constructor(
-    core: ValidatorCore,
+    core: ValidatorWithBroadcast,
     host: string,
     port: number,
     allValidators: ValidatorInfo[]
@@ -41,25 +45,39 @@ export class ValidatorServer {
     // Register RPC handlers
     this.rpcHandlers["eth_sendRawTransaction"] = ([signedTx]) =>
       this.core.onTransaction(signedTx as string);
-    this.rpcHandlers["submitVote"] = ([vote]) => {
-      this.core.onVote(vote as Vote);
+    this.rpcHandlers["submitVote"] = async ([vote]) => {
+      await this.core.onVote(vote as Vote);
+      return { ok: true };
+    };
+    this.rpcHandlers["submitVotes"] = async ([votes]) => {
+      for (const vote of votes as Vote[]) {
+        try { await this.core.onVote(vote); } catch {}
+      }
       return { ok: true };
     };
     this.rpcHandlers["eth_getRecoveryInfo"] = ([account]) =>
       this.core.getRecoveryInfo(account as string);
 
-    // Set up vote broadcasting over network
-    this.core.setBroadcastCallback((vote) => this.broadcastVote(vote));
+    // Set up fire-and-forget vote broadcasting over network.
+    // Intentionally not returning the promise so that onTransaction returns
+    // the vote to the client without waiting for peer broadcasts.
+    this.core.setBroadcastCallback((vote) => {
+      this.broadcastVote(vote);
+    });
   }
 
   get address(): string {
     return this.core.address;
   }
 
-  async start(): Promise<void> {
-    const server = createServer((req, res) => this.handleRequest(req, res));
-    server.listen(this.port, this.host, () => {
-      console.log(`[${this.address.slice(0, 8)}] Listening on ${this.host}:${this.port}`);
+  start(): Promise<void> {
+    return new Promise((resolve) => {
+      const server = createServer(
+        { insecureHTTPParser: true },
+        (req, res) => this.handleRequest(req, res)
+      );
+      server.keepAliveTimeout = 60000;
+      server.listen(this.port, this.host, () => resolve());
     });
   }
 
@@ -85,42 +103,37 @@ export class ValidatorServer {
       }
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(response));
+    const payload = JSON.stringify(response);
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload),
+    });
+    res.end(payload);
   }
 
   private readBody(req: IncomingMessage): Promise<string> {
     return new Promise((resolve) => {
-      let body = "";
-      req.on("data", (chunk) => (body += chunk));
-      req.on("end", () => resolve(body));
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => resolve(Buffer.concat(chunks).toString()));
     });
   }
 
-  private async broadcastVote(vote: Vote): Promise<void> {
-    const request: JsonRpcRequest = {
+  private broadcastVote(vote: Vote): void {
+    const body = JSON.stringify({
       jsonrpc: "2.0",
-      id: Date.now(),
+      id: 1,
       method: "submitVote",
       params: [vote],
-    };
+    });
 
     for (const peer of this.peers) {
-      try {
-        await fetch(`http://${peer.host}:${peer.port}/rpc`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
-        });
-      } catch {
-        // Peer unreachable, ignore
-      }
+      fetch(`http://${peer.host}:${peer.port}/rpc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).catch(() => {});
     }
-  }
-
-  // Expose IValidator methods for direct access
-  getAccountState(address: string): AccountState {
-    return this.core.getAccountState(address);
   }
 
   async onTransaction(signedTx: string): Promise<Vote> {
@@ -174,30 +187,11 @@ export class RemoteValidator implements IValidator {
   }
 }
 
-// Helper to create validator network with servers
-export function createValidatorNetwork(
+// Generate deterministic validator keys and infos
+export function generateValidatorKeys(
   count: number,
-  genesisAccounts: GenesisAccount[] = [],
   basePort: number = 3000
-): ValidatorServer[] {
-  const { validators, validatorInfos } = createValidatorCoresForNetwork(count, genesisAccounts, basePort);
-
-  const servers: ValidatorServer[] = [];
-  for (let i = 0; i < count; i++) {
-    servers.push(
-      new ValidatorServer(validators[i], "127.0.0.1", basePort + i, validatorInfos)
-    );
-  }
-
-  return servers;
-}
-
-// Internal helper to create cores with network info
-function createValidatorCoresForNetwork(
-  count: number,
-  genesisAccounts: GenesisAccount[],
-  basePort: number
-): { validators: ValidatorCore[]; validatorInfos: ValidatorInfo[] } {
+): { privateKeys: string[]; validatorInfos: ValidatorInfo[] } {
   const validatorInfos: ValidatorInfo[] = [];
   const privateKeys: string[] = [];
 
@@ -212,10 +206,24 @@ function createValidatorCoresForNetwork(
     });
   }
 
-  const validators: ValidatorCore[] = [];
+  return { privateKeys, validatorInfos };
+}
+
+// Helper to create validator network with servers
+export function createValidatorNetwork(
+  count: number,
+  genesisAccounts: GenesisAccount[] = [],
+  basePort: number = 3000
+): ValidatorServer[] {
+  const { privateKeys, validatorInfos } = generateValidatorKeys(count, basePort);
+
+  const servers: ValidatorServer[] = [];
   for (let i = 0; i < count; i++) {
-    validators.push(new ValidatorCore(privateKeys[i], validatorInfos, genesisAccounts));
+    const core = new ValidatorCore(privateKeys[i], validatorInfos, genesisAccounts);
+    servers.push(
+      new ValidatorServer(core, "127.0.0.1", basePort + i, validatorInfos)
+    );
   }
 
-  return { validators, validatorInfos };
+  return servers;
 }
