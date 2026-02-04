@@ -4,7 +4,7 @@
 \section{Protocol Overview}
 \label{sec:protocol-overview}
 
-In this section, we progressively extend the FastPay construction to allow for full recovery. On a high level,
+We progressively extend the FastPay construction to allow for full recovery. On a high level,
 we would like a healing client to send a special \emph{recovery transaction} that allows validators to safely
 release the pending state and move the client's nonce forward.
 
@@ -434,6 +434,3 @@ of checking sufficient balance (line~\ref{line:check-balance}), validators verif
 of updating balances (line~\ref{line:execute-transfer}), validators execute the smart contract in the VM
 based on the finalized transaction. The protocol guarantees a consistent chain of transactions per account,
 ensuring that all validators arrive at the same account state.
-
-
-\za{this section is a bit weak, as everything so far is properly defined and here we claim an extension. its ok for now, i jsut leave the comment in case we have more time. its NOT a priority.}

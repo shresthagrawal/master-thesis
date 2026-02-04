@@ -313,17 +313,18 @@ async function bench1(mode: Mode, n: number): Promise<BenchmarkResult> {
   };
 }
 
-// ─── Benchmark 2: Single-account sequential throughput ───────────────────────
+// ─── Benchmark 2: Single-account sequential L-curve ─────────────────────────
 
 async function bench2(mode: Mode, n: number): Promise<BenchmarkResult> {
-  const durationSec = 30;
+  const targetTpsLevels = [10, 20, 40, 80, 120, 160, 250, 500];
+  const phaseDurationSec = 10;
   const wallet = makeWallet("bench2-account");
-  const maxTxs = 10000;
 
-  // Precompute sequential transactions (value=0, no genesis needed)
-  console.log(`[bench2/${mode}] Precomputing ${maxTxs} sequential transactions...`);
+  // Precompute enough sequential transactions for all phases
+  const totalTxs = targetTpsLevels.reduce((sum, tps) => sum + tps * phaseDurationSec, 0);
+  console.log(`[bench2/${mode}] Precomputing ${totalTxs} sequential transactions...`);
   const precomputed: string[] = [];
-  for (let i = 0; i < maxTxs; i++) {
+  for (let i = 0; i < totalTxs; i++) {
     precomputed.push(await signTx(wallet, i, RECIPIENT, 0n));
   }
   console.log(`[bench2/${mode}] Precomputation done`);
@@ -338,36 +339,60 @@ async function bench2(mode: Mode, n: number): Promise<BenchmarkResult> {
     await broadcastAndCollect(tx, ports, quorum);
   }
 
-  console.log(`[bench2/${mode}] Running for ${durationSec}s (sequential)...`);
-  const results: TxResult[] = [];
+  const allResults: TxResult[] = [];
+  const phaseSummaries: PhaseSummary[] = [];
   let nonce = 0;
-  const runStart = Date.now();
-  const runEnd = runStart + durationSec * 1000;
 
-  while (Date.now() < runEnd && nonce < precomputed.length) {
-    const txStart = Date.now();
-    const { latencyMs, votes } = await broadcastAndCollect(precomputed[nonce], ports, quorum);
-    results.push({
-      clientId: 0, nonce, latencyMs, votes: votes.length,
-      timestamp: txStart, phase: 0,
-    });
-    // Submit collected votes to all validators so they process the certificate
-    // and advance the nonce before we send the next tx.
-    await submitVotesToAll(votes, ports);
-    nonce++;
+  for (let phaseIdx = 0; phaseIdx < targetTpsLevels.length; phaseIdx++) {
+    const targetTps = targetTpsLevels[phaseIdx];
+    const totalTxsInPhase = targetTps * phaseDurationSec;
+    const intervalMs = 1000 / targetTps;
+    const phaseResults: TxResult[] = [];
+
+    console.log(`[bench2/${mode}] Phase ${phaseIdx}: ${targetTps} tx/s (${totalTxsInPhase} txs)...`);
+
+    if (nonce + totalTxsInPhase > precomputed.length) {
+      console.log(`  → Not enough precomputed txs, stopping`);
+      break;
+    }
+
+    const phaseStart = Date.now();
+
+    for (let i = 0; i < totalTxsInPhase; i++) {
+      const loopStart = performance.now();
+      const txTimestamp = Date.now();
+
+      // Sequential: send tx, wait for quorum, submit votes to advance nonce
+      const { latencyMs, votes } = await broadcastAndCollect(precomputed[nonce], ports, quorum);
+      phaseResults.push({
+        clientId: 0, nonce, latencyMs, votes: votes.length,
+        timestamp: txTimestamp, phase: phaseIdx,
+      });
+      await submitVotesToAll(votes, ports);
+      nonce++;
+
+      // Rate limit: if we finished faster than the interval, sleep the remainder
+      const elapsed = performance.now() - loopStart;
+      if (elapsed < intervalMs && i < totalTxsInPhase - 1) {
+        await sleep(intervalMs - elapsed);
+      }
+    }
+
+    const actualDuration = (Date.now() - phaseStart) / 1000;
+    const summary = computeStats(phaseResults, actualDuration, targetTps, phaseIdx);
+    phaseSummaries.push(summary);
+    allResults.push(...phaseResults);
+
+    console.log(
+      `  → achieved ${summary.actualTps.toFixed(1)} tx/s, ` +
+      `median=${summary.medianLatencyMs.toFixed(1)}ms, p95=${summary.p95LatencyMs.toFixed(1)}ms`
+    );
   }
-
-  const actualDuration = (Date.now() - runStart) / 1000;
-  const summary = computeStats(results, actualDuration, 0, 0);
-  console.log(
-    `[bench2/${mode}] Done: ${results.length} txs in ${actualDuration.toFixed(1)}s ` +
-    `= ${summary.actualTps.toFixed(1)} tx/s, median=${summary.medianLatencyMs.toFixed(1)}ms`
-  );
 
   killAll(procs);
   return {
     benchmark: "bench2", mode, nValidators: n, fByzantine: f, finalityQuorum: quorum,
-    phases: [summary], rawResults: results,
+    phases: phaseSummaries, rawResults: allResults,
   };
 }
 

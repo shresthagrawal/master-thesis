@@ -47,7 +47,12 @@ function findLatest(dir: string, prefix: string): string | null {
   if (!fs.existsSync(dir)) return null;
   const files = fs.readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json"));
   if (files.length === 0) return null;
-  files.sort();
+  // Sort by embedded timestamp (last number before .json) to pick the most recent run
+  files.sort((a, b) => {
+    const tsA = parseInt(a.replace(".json", "").split("-").pop() || "0");
+    const tsB = parseInt(b.replace(".json", "").split("-").pop() || "0");
+    return tsA - tsB;
+  });
   return path.join(dir, files[files.length - 1]);
 }
 
@@ -92,20 +97,18 @@ function generateBench1Data(classic: BenchmarkResult, recovery: BenchmarkResult,
 // ─── bench2 data generation ─────────────────────────────────────────────────
 
 function generateBench2Data(classic: BenchmarkResult, recovery: BenchmarkResult, outputDir: string): void {
-  const cp = classic.phases[0];
-  const rp = recovery.phases[0];
+  // Latency L-curve data — same column format as bench1-latency.dat
+  let latencyDat = "classic_tps\tclassic_median\tclassic_p95\trecovery_tps\trecovery_median\trecovery_p95\n";
+  for (let i = 0; i < Math.min(classic.phases.length, recovery.phases.length); i++) {
+    const cp = classic.phases[i];
+    const rp = recovery.phases[i];
+    latencyDat +=
+      `${cp.actualTps.toFixed(2)}\t${cp.medianLatencyMs.toFixed(2)}\t${cp.p95LatencyMs.toFixed(2)}\t` +
+      `${rp.actualTps.toFixed(2)}\t${rp.medianLatencyMs.toFixed(2)}\t${rp.p95LatencyMs.toFixed(2)}\n`;
+  }
+  fs.writeFileSync(path.join(outputDir, "bench2-latency.dat"), latencyDat);
 
-  let dat = "mode\tthroughput\tmeanLatency\tmedianLatency\tp95Latency\n";
-  dat += `classic\t${cp.actualTps.toFixed(2)}\t${cp.meanLatencyMs.toFixed(2)}\t${cp.medianLatencyMs.toFixed(2)}\t${cp.p95LatencyMs.toFixed(2)}\n`;
-  dat += `recovery\t${rp.actualTps.toFixed(2)}\t${rp.meanLatencyMs.toFixed(2)}\t${rp.medianLatencyMs.toFixed(2)}\t${rp.p95LatencyMs.toFixed(2)}\n`;
-  fs.writeFileSync(path.join(outputDir, "bench2-throughput.dat"), dat);
-
-  // Also generate a LaTeX table fragment for direct inclusion
-  let table = `Classic FastPay & ${cp.actualTps.toFixed(1)} & ${cp.medianLatencyMs.toFixed(1)} & ${cp.meanLatencyMs.toFixed(1)} & ${cp.p95LatencyMs.toFixed(1)} \\\\\n`;
-  table += `FastPay with Recovery & ${rp.actualTps.toFixed(1)} & ${rp.medianLatencyMs.toFixed(1)} & ${rp.meanLatencyMs.toFixed(1)} & ${rp.p95LatencyMs.toFixed(1)} \\\\`;
-  fs.writeFileSync(path.join(outputDir, "bench2-table.tex"), table);
-
-  console.log("  → bench2-throughput.dat, bench2-table.tex");
+  console.log("  → bench2-latency.dat");
 }
 
 // ─── bench3 data generation ─────────────────────────────────────────────────
@@ -176,7 +179,7 @@ function main(): void {
   const bench2Classic = findLatest(resultsDir, "bench2-classic");
   const bench2Recovery = findLatest(resultsDir, "bench2-recovery");
   if (bench2Classic && bench2Recovery) {
-    console.log("\nBench2 (Single-account throughput):");
+    console.log("\nBench2 (Single-account L-curve):");
     generateBench2Data(loadResult(bench2Classic), loadResult(bench2Recovery), outputDir);
   } else {
     console.log("Bench2: Skipped (missing result files)");

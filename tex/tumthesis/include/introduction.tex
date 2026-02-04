@@ -1,13 +1,11 @@
 \chapter{Introduction}
 \label{chap:introduction}
 
-\fp{$\square$ Consider adding the RQs in the introduction (even if you don't fully answer them). Mention them here and provide answers at the end of the document. If we pivoted, that is fine, just mention it.}
-
 Blockchains suffer from a scalability problem. During periods of high demand, transaction fees have repeatedly spiked and networks have become slow or unusable. The most widely adopted response has been Layer-2 (L2) scaling solutions, such as rollups. Rollups move execution off-chain while relying on a single sequencer to order transactions, execute them, and extract the new state. The sequencer posts these transaction batches along with the resulting states to the underlying Layer-1 blockchain. While effective in practice, rollups either introduce centralization~\cite{zk-rollups} when the sequencer must provide a proof of validity for the resulting state, or worsen finality guarantees in optimistic designs where the sequencer can post wrong states and thus users must wait out a dispute period~\cite{arbitrum}.
 
 An alternative approach is to relax the requirement for strong-consensus or total ordering altogether. This tradeoff is well understood in distributed systems, where asynchronous execution sacrifices strong consistency (all nodes agree on the state at every step) for eventual consistency (nodes may temporarily diverge but eventually converge to the same state) to achieve better performance. In the blockchain setting, it has been shown that not all applications require consensus: in particular, BFT payment systems can be implemented without total ordering. This insight has led to a line of work on consensusless Byzantine fault-tolerant protocols. FastPay~\cite{fastpay} provides a particularly simple solution for payments: clients collect validator votes to finalize transfers within a single network round trip, avoiding consensus entirely.
 
-These protocols achieve confirmation within a single network round trip and support throughput several orders of magnitude higher than consensus-based systems-for example, FastPay~\cite{fastpay} reports over 160,000 transactions per second compared to Ethereum's approximately 15 TPS~\cite{ethereum-tps} or Solana's 4,000 TPS under real-world conditions~\cite{solana-tps}. However, despite these advantages, consensusless protocols have not seen meaningful production adoption.
+These protocols achieve confirmation within a single network round trip and support throughput several orders of magnitude higher than consensus-based systems -- for example, FastPay~\cite{fastpay} reports over 160,000 transactions per second compared to Ethereum's approximately 15 TPS~\cite{ethereum-tps} or Solana's 4,000 TPS under real-world conditions~\cite{solana-tps}. However, despite these advantages, consensusless protocols have not seen meaningful production adoption.
 
 A key limitation is fragility in the presence of faulty clients. Consensusless protocols typically rely on nonce-based sequencing to enforce local ordering. If a client equivocates by issuing multiple transactions with the same nonce, the affected state can become permanently locked. Such equivocation need not be malicious and can arise from crash faults, for example when a client restarts without remembering that it has already sent a transaction using a given nonce. 
 
@@ -15,7 +13,7 @@ Handling equivocation is particularly challenging in the Byzantine setting. Some
 
 In this thesis, we present a fast-path recovery protocol for consensusless systems that enables recovery from client equivocation without fallback consensus. Our construction operates in the $5f+1$ fault model and preserves confirmation latency of a single network round trip. We give a concrete construction extending FastPay with a recovery mechanism inspired by Simplex view change.
 
-Once a client detects that it is locked, it collects $n-f$ validator attestations over the conflicting transactions and constructs a special recovery transaction that either selects a valid candidate transaction or skips the equivocated nonce. Validators can safely sign this recovery transaction without violating safety. Once the recovery transaction gathers sufficient votes, the referenced transaction chain is finalized. We implement the protocol and evaluate its performance, showing that latency and throughput remain unchanged relative to the original fast path \za{we need comparative evaluation showing no change}. We believe this work solves a cornerstone problem in the production deployment of consensusless blockchain protocols.
+Once a client detects that it is locked, it collects $n-f$ validator attestations over the conflicting transactions and constructs a special recovery transaction that either selects a valid candidate transaction or skips the equivocated nonce. Validators can safely sign this recovery transaction without violating safety. Once the recovery transaction gathers sufficient votes, the referenced transaction chain is finalized. We implement the protocol and evaluate its performance, showing that latency and throughput remain unchanged relative to the original fast path. We believe this work solves a cornerstone problem in the production deployment of consensusless blockchain protocols.
 
 \section{Research Questions}
 \label{sec:research-questions}
@@ -24,7 +22,7 @@ This thesis was originally motivated by the broader question of enabling smart c
 
 \begin{description}
     \item[\textit{RQ 1}:] \textit{What data structures and operations are safe in the fast path?}
-    Consensusless protocols like FastPay~\cite{fastpay} support only payments. Extending them to richer applications requires identifying which data structures---such as CRDTs---can be safely used without global ordering.
+    Consensusless protocols like FastPay~\cite{fastpay} support only payments. Extending them to richer applications requires identifying which data structures -- such as Conflict-Free Replicated Data Types (CRDTs) -- can be safely used without global ordering.
 
     \item[\textit{RQ 2}:] \textit{Can the EVM be modified to support asynchronous execution?}
     The Ethereum Virtual Machine assumes a totally ordered transaction ledger. Adapting it for consensusless execution requires relaxing state access and context variable semantics.

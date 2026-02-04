@@ -1,6 +1,5 @@
 \chapter{Background and Preliminaries}
 
-\fp{$\square$ Add more information about CRDTs in this chapter.}
 \label{chap:background}
 
 \section{Cryptographic Primitives}
@@ -107,7 +106,7 @@ If all honest validators execute the same ordered ledger, they compute the same 
 \section{Consensusless Protocols}
 \label{sec:consensusless-protocols}
 
-In this thesis, we use \emph{consensusless protocols} to mean protocols that avoid global consensus and total ordering. The key idea is that many workloads do not require a globally agreed total order to be safely executed.
+In this thesis, we use \emph{consensusless protocols} to mean protocols that avoid global consensus and total ordering. Many workloads do not require a globally agreed total order to be safely executed.
 
 \textbf{Payments without total order.}
 The original motivation for blockchains was Byzantine fault-tolerant payments. However, it has been shown that global payments can be supported without solving consensus: it is sufficient to ensure local ordering for each sender and to restrict state updates so that conflicts are avoided~\cite{consensus-number}. Intuitively, independent transfers (e.g., Alice$\rightarrow$Bob and Charlie$\rightarrow$Dave) do not interact, and reordering them yields the same final state.
@@ -116,6 +115,12 @@ More generally, many safe fast-path operations are commutative: executing them i
 \[
 +\$5 \text{ and } +\$7 \text{ commute, so their order does not matter.}
 \]
+Conflict-Free Replicated Data Types (CRDTs)~\cite{crdts} formalize this property:
+they are data structures whose operations commute by design, so concurrent updates
+from different replicas always converge to the same state without coordination.
+CRDTs are widely used in collaborative editing (e.g., Google Docs, Figma) and
+distributed databases (e.g., Riak, Redis) where low-latency updates across replicas
+matter more than strict ordering.
 
 The main non-commutative edge case arises from overspending. Subtractions are not commutative in the presence of an underflow constraint (e.g., balances must remain non-negative). Whether a withdrawal is valid depends on the ordering of that account's outgoing payments.
 
@@ -123,9 +128,9 @@ The main non-commutative edge case arises from overspending. Subtractions are no
 Payments can avoid consensus because validity checks for spending can be made locally by the spender. An honest client can ensure a new transfer does not underflow given its confirmed deposits and outgoing payments. Other parties can increase a client's balance but cannot decrease it. This asymmetry is why cryptocurrency-like objects have consensus number 1~\cite{consensus-number}.
 
 \textbf{Why consensusless protocols are fast.}
-Avoiding consensus eliminates multiple rounds of validator-to-validator coordination. As a concrete data point, FastPay~\cite{fastpay} reports intra-continental confirmation latency below 100ms and throughput above 80,000 transactions per second with 20 authorities in controlled experiments.
+Avoiding consensus eliminates multiple rounds of validator-to-validator coordination. FastPay~\cite{fastpay} reports intra-continental confirmation latency below 100ms and throughput above 80,000 transactions per second with 20 authorities in controlled experiments.
 
-For comparison, consensus protocols-even highly optimized modern ones-require multiple message rounds to commit. For example, HotStuff-style protocols~\cite{hotstuff} commit through multiple phases (often described as three round trips in the baseline design). Recent DAG-based consensus protocols reduce latency and can reach very high throughput, but they still solve a global ordering problem and therefore incur additional coordination; Mysticeti-C~\cite{mysticeti} reports WAN commit latency around 0.5s while sustaining over 200k TPS.
+For comparison, consensus protocols -- even highly optimized modern ones -- require multiple message rounds to commit. For example, HotStuff-style protocols~\cite{hotstuff} commit through multiple phases (often described as three round trips in the baseline design). Recent DAG-based consensus protocols reduce latency and can reach very high throughput, but they still solve a global ordering problem and therefore incur additional coordination; Mysticeti-C~\cite{mysticeti} reports WAN commit latency around 0.5s while sustaining over 200k TPS.
 
 Consensusless protocols also enable horizontal scalability because execution can be sharded by object/account: disjoint state can be processed in parallel across machines, a property emphasized in FastPay's design.
 
@@ -134,13 +139,11 @@ Consensusless protocols also enable horizontal scalability because execution can
 
 The lack of liveness under conflicts is often described as a limitation affecting only malicious clients. In practice, however, conflict behavior can occur naturally due to benign faults and common wallet behavior, making it a significant obstacle to deploying consensusless protocols in production.
 
-First, it is common in existing blockchain ecosystems for wallets to intentionally reuse the same nonce to replace or cancel a pending transaction-for example, by reissuing an otherwise empty transfer with a higher fee so that the new transaction supersedes the old one in the mempool. This technique is a routine part of user experience in account-based systems. In a consensusless protocol that relies on local ordering, the same behavior becomes equivocation: different validators may observe different transactions for the same nonce, which can lead to a permanent lock under existing designs.
+First, it is common in existing blockchain ecosystems for wallets to intentionally reuse the same nonce to replace or cancel a pending transaction -- for example, by reissuing an otherwise empty transfer with a higher fee so that the new transaction supersedes the old one in the mempool. This technique is a routine part of user experience in account-based systems. In a consensusless protocol that relies on local ordering, the same behavior becomes equivocation: different validators may observe different transactions for the same nonce, which can lead to a permanent lock under existing designs.
 
-Second, many widely deployed wallets are effectively stateless. A typical workflow is: wake up, query a full node for the latest nonce, construct a transaction, sign, and send-without persisting additional state beyond the private key. In a synchronous blockchain with a globally ordered ledger, this is often sufficient: the chain defines the canonical nonce progression. In consensusless protocols, this becomes problematic. If a wallet crashes after sending a transaction but before persisting the used nonce (or before learning which validators observed it), the wallet may later resend with the same nonce, unintentionally equivocating. Preventing this would require wallets to implement a non-equivocation gadget-e.g., durable local storage and crash-recovery logic that ensures a nonce is never reused-which begins to resemble the operational complexity of validator setups. This breaks composability with existing wallet infrastructure and significantly raises the bar for adoption.
+Second, many widely deployed wallets are effectively stateless. A typical workflow is: wake up, query a full node for the latest nonce, construct a transaction, sign, and send -- without persisting additional state beyond the private key. In a synchronous blockchain with a globally ordered ledger, this is often sufficient: the chain defines the canonical nonce progression. In consensusless protocols, this becomes problematic. If a wallet crashes after sending a transaction but before persisting the used nonce (or before learning which validators observed it), the wallet may later resend with the same nonce, unintentionally equivocating. Preventing this would require wallets to implement a non-equivocation gadget -- e.g., durable local storage and crash-recovery logic that ensures a nonce is never reused -- which begins to resemble the operational complexity of validator setups. This breaks composability with existing wallet infrastructure and significantly raises the bar for adoption.
 
-This thesis addresses precisely this practical gap: enabling robust progress for clients that may equivocate due to benign faults, without requiring wallets to become stateful or to implement sophisticated non-equivocation mechanisms.
-
-We formalize this deployment-relevant client behavior using the notion of a \emph{healing client}.
+This thesis addresses this gap: enabling progress for clients that may equivocate due to benign faults, without requiring wallets to become stateful or to implement non-equivocation mechanisms. We formalize this client behavior as a \emph{healing client}.
 
 \begin{definition}[Healing client]
 A client is \emph{healing} if it may deviate arbitrarily for some period of time (e.g., due to crashes, bugs, or lost local state), but after some time $t_h$ it follows the protocol correctly.

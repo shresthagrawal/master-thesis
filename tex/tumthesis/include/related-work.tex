@@ -1,16 +1,45 @@
 \chapter{Related Work}
 \label{chap:related-work}
 
-\za{I would start for completeness all major BFT protocols and say they do consensus, i.e., total ordering, with various trade-offs, and then mention the trade offs of PBFT, Tenedetmint, Hotstuff, Simplex, etc with each others and then position among these trade offs the consensus-free protocols that relax the adversarial threshold to 20\% vs 33\% to achieve the 1 rtt instead of 2.  }
+\section{Byzantine Consensus Protocols}
+\label{sec:rw-bft-consensus}
+
+Byzantine fault-tolerant (BFT) consensus protocols provide total ordering of
+transactions across validators, tolerating up to $f$ Byzantine faults among $n
+= 3f+1$ participants. PBFT~\cite{pbft} established the classical three-phase
+commit pattern with $O(n^2)$ message complexity. Tendermint~\cite{tendermint}
+simplified this for blockchains with round-based voting and timeout-driven view
+changes but inherits multi-round latency. HotStuff~\cite{hotstuff} reduced
+view change to linear message complexity and introduced pipelining, enabling
+practical leader-based BFT at scale. Simplex~\cite{simplex} further simplified
+the design by cleanly separating safety from progress, using $\bot$-voting to
+skip faulty views within a single round trip.
+
+All these protocols achieve strong consistency through total ordering, but at
+the cost of multiple communication rounds per commit. A separate line of work
+revisits the $5f+1$ fault model for fast Byzantine
+consensus~\cite{fab-paxos, revisiting-5f}. Martin and Alvisi~\cite{fab-paxos}
+showed that two-step Byzantine consensus requires $5f+1$ processes, later
+refined to $5f-1$ by Kuznetsov et al.~\cite{revisiting-5f}. This model trades
+a stricter fault threshold (20\% vs 33\%) for single-round-trip finality when
+all validators are responsive, while gracefully degrading to slower paths under
+partial participation. Building on these foundations, several recent protocols
+exploit this tradeoff~\cite{minimmit, banyan, kudzu, hydrangea, alpenglow}.
+Banyan~\cite{banyan} achieves single-round-trip confirmation with rotating
+leaders. Kudzu~\cite{kudzu} provides high throughput through erasure-coded
+block dissemination while maintaining a fast path. Hydrangea~\cite{hydrangea}
+introduces a dual-mode commit mechanism tolerating both Byzantine and crash
+faults. Alpenglow~\cite{alpenglow} applies these ideas to Solana's consensus
+layer, achieving sub-second finality through dual-threshold voting.
+
 \section{Consensusless Protocols}
 \label{sec:rw-consensusless-protocols}
 
-Consensus-free blockchain protocols exploit the observation that asset transfers and other
-restricted state updates do not require total ordering. Instead, these workloads can be finalized
+Asset transfers and other restricted state updates do not require total ordering. Instead, these workloads can be finalized
 using local sequencing and quorum certificates, avoiding the latency and coordination overhead of
 global consensus.
 
-The expressiveness of consensusless protocols depends on the type of state being updated. Three broad classes emerge: (1) \emph{commutative multi-writer state}, where updates can be applied in any order (e.g., deposit-only balances, CRDTs); (2) \emph{non-commutative single-writer state}, where a single owner sequences updates to avoid conflicts (e.g., account balances with withdrawals); and (3) \emph{non-commutative multi-writer state}, where concurrent updates from multiple writers require consensus-like coordination to resolve conflicts. \sa{double check this paragraph}
+The expressiveness of consensusless protocols depends on the type of state being updated. Three broad classes emerge: (1) \emph{commutative multi-writer state}, where updates can be applied in any order (e.g., deposit-only balances, CRDTs); (2) \emph{non-commutative single-writer state}, where a single owner sequences updates to avoid conflicts (e.g., account balances with withdrawals); and (3) \emph{non-commutative multi-writer state}, where concurrent updates from multiple writers require consensus-like coordination to resolve conflicts.
 
 FastPay~\cite{fastpay} pioneered this approach with a permissioned payment protocol in which clients
 collect validator votes to finalize transfers within a single network round trip, assuming
@@ -60,35 +89,20 @@ performance.
 \section{Recovery as View Change}
 \label{sec:rw-view-change}
 
-Recovery from client equivocation in consensusless protocols closely resembles view change in
-Byzantine consensus protocols. In classical state-machine replication, a faulty leader may
-equivocate or stall progress, and view-change mechanisms allow replicas to safely move to a new
-leader without violating safety. This idea originates in PBFT~\cite{pbft} and has been refined in
-later protocols such as HotStuff~\cite{hotstuff}, which achieves linear view change and
-responsiveness.
+Recovery from client equivocation in consensusless protocols closely resembles
+view change in BFT consensus (Section~\ref{sec:rw-bft-consensus}). In
+classical state-machine replication, a faulty leader may equivocate or stall
+progress, and view-change mechanisms allow replicas to safely move to a new
+leader without violating safety.
 
-Simplex~\cite{simplex} presents a particularly clean view-change design, separating safety from
-progress and minimizing protocol complexity. More recent work explores optimized view-change and
-finality mechanisms under different fault models. Minimmit~\cite{minimmit}, for example, studies
-fast finality protocols in the $5f+1$ model and analyzes how distinct quorum thresholds can be used
-for progress and finalization in protocols following the Simplex mould.
+Our recovery protocol applies this analogy directly: each account acts as a
+leader, sequencing its own transactions across nonces. Client equivocation
+corresponds to leader equivocation in consensus. Recovery consists of
+collecting validator attestations about prior votes -- analogous to view-change
+messages -- and safely advancing the account's ``view'' (nonce) without
+reverting finalized state.
 
-A recent stream of work revisits the $5f+1$ fault model for fast Byzantine
-consensus~\cite{fab-paxos, revisiting-5f}. Martin and Alvisi~\cite{fab-paxos} originally showed that
-two-step Byzantine consensus requires $5f+1$ processes, later refined to $5f-1$ by Kuznetsov et
-al.~\cite{revisiting-5f}. This model enables single-round-trip finality when a supermajority of
-validators are responsive, while gracefully degrading to slower paths under partial participation.
-Building on these foundations, several recent protocols exploit this
-tradeoff~\cite{minimmit, banyan, kudzu, hydrangea, alpenglow}. Banyan~\cite{banyan} achieves
-single-round-trip confirmation with rotating leaders. Kudzu~\cite{kudzu} provides high throughput
-through erasure-coded block dissemination while maintaining a seamless fast path.
-Hydrangea~\cite{hydrangea} introduces a dual-mode commit mechanism tolerating both Byzantine and
-crash faults. Alpenglow~\cite{alpenglow} applies these ideas to Solana's consensus layer, achieving
-sub-second finality through dual-threshold voting.
-
-Our recovery protocol adopts this perspective: each account acts as a leader, sequencing its own
-transactions across nonces. Client equivocation corresponds to leader equivocation in consensus.
-Recovery consists of collecting validator attestations about prior votes-analogous to view-change
-messages-and safely advancing the account's ``view'' (nonce) without reverting finalized state.
-The design is particularly inspired by Simplex-style view change and the separation of quorum
-thresholds studied in Minimmit, adapted to a per-account consensusless execution setting.
+The design is inspired by Simplex-style~\cite{simplex} $\bot$-voting and
+Minimmit~\cite{minimmit}, which extends Simplex to achieve one round-trip
+finality in the $5f+1$ model by separating notarisation and finalisation
+quorum thresholds.

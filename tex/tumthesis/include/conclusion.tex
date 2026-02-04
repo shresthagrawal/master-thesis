@@ -6,7 +6,7 @@ inability to recover from client equivocation without resorting to fallback cons
 a fast-path recovery protocol that enables locked accounts to resume transacting while preserving
 the low-latency guarantees that motivate consensusless execution.
 
-Our key insight is that recovery from client equivocation closely mirrors view change in Byzantine
+Our key insight is that recovery from client equivocation mirrors view change in Byzantine
 consensus protocols. By operating in the $5f+1$ fault model, we ensure that any two $(n-f)$-certificates
 share at least $2f+1$ honest validators, guaranteeing majority support for the same transaction.
 This property enables safe recovery: a client can construct a recovery transaction that references
@@ -19,9 +19,9 @@ cases where no transaction achieves majority support (resolved by signing $\bot$
 recovery when recovery transactions themselves conflict. The mechanism is implemented as a special
 recovery contract address, maintaining compatibility with existing Ethereum wallets and tooling.
 
-We implemented a prototype of the protocol, demonstrating the feasibility of the construction.
-The recovery mechanism integrates naturally with the existing FastPay transaction flow, requiring
-only the addition of a recovery contract address and extended certificate handling logic.
+We implemented a prototype of the protocol. The recovery mechanism integrates with the
+existing FastPay transaction flow, requiring only the addition of a recovery contract address
+and extended certificate handling logic.
 
 \section{Limitations}
 
@@ -36,6 +36,8 @@ only the addition of a recovery contract address and extended certificate handli
 \textbf{Reducing the fault threshold.} Our protocol requires $5f+1$ validators, tolerating up to 20\% Byzantine faults, compared to $3f+1$ for standard FastPay which tolerates up to 33\%. Similar to the original Simplex construction which operates in the $3f+1$ model, it is possible to reduce the fault threshold at the cost of an additional round trip during recovery. Exploring this tradeoff between adversarial resilience and recovery latency is an interesting direction for future work.
 
 \textbf{Optimizing vote storage.} Validators currently store all votes to support recovery queries. Techniques such as vote aggregation, garbage collection of old nonces, or cryptographic accumulators could reduce storage overhead while preserving recovery functionality.
+
+\textbf{Performance evaluation.} Our benchmarks use a Node.js prototype running on a single machine. Reimplementing the protocol in a systems language such as Rust with native cryptographic libraries and benchmarking across geographically distributed validators would give a more accurate picture of production performance and allow direct comparison with the original FastPay results~\cite{fastpay}.
 
 \textbf{Production deployment.} Recovery from client equivocation is one key problem for deploying consensusless protocols, but several other challenges remain. These include validator set changes (reconfiguration), gas cost and pricing mechanisms to protect against denial-of-service attacks, state synchronization and efficient state reading for new or recovering validators, and light client support for resource-constrained devices. Addressing these challenges is necessary for practical adoption of consensusless protocols.
 
