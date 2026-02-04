@@ -93,9 +93,9 @@ By Theorem~\ref{thm:safety}, for each sender account $a$ there is a single well-
 (non-$\bot$) payments are finalized for any sender nonce.
 
 It remains to observe that every state transition that changes balances is value-preserving.
-Inspect Algorithm~\ref{alg:validator-recovery-cert}: the only operation that updates balances is \textsc{ExecuteTransfer}
-(line~\ref{line:execute-transfer}), which subtracts $\mathsf{amt}$ from the sender and adds the same $\mathsf{amt}$
-to the recipient. Thus each executed payment preserves the sum of all balances.
+Inspect Algorithm~\ref{alg:validator-recovery-cert}: the only operation that updates balances is \textsc{ExecuteTransfer},
+called at line~\ref{line:execute-transfer}, which subtracts $\mathsf{amt}$ from the sender (line~\ref{line:balance-sub})
+and adds the same $\mathsf{amt}$ to the recipient (line~\ref{line:balance-add}). Thus each executed payment preserves the sum of all balances.
 Skipping a nonce using $\bot$ does not update balances, and recovery transactions have amount
 zero and only serve to select and/or execute an underlying payment via $\textsc{GetTxChainStart}$.
 Therefore, by induction over the sequence of executed transfers at $v_i$, the global sum of balances

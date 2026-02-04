@@ -183,23 +183,24 @@ Our recovery protocol (Chapter~\ref{chap:protocol}) provides liveness for healin
 We restrict attention to \emph{payment} transactions (transfers) as in FastPay-style
 protocols: a sender authorizes a transfer of an amount to a recipient using a per-sender
 nonce for sequencing (cf.\ Sections~\ref{sec:transactions-ledgers}--\ref{sec:termination-tradeoff}).
-The first three properties below - safety, authenticity, and liveness - are inherited from
-FastPay~\cite{fastpay}. Our contribution is the fourth: relaxing the liveness condition to
-healing clients via the recovery mechanism.
+Safety and authenticity are inherited from FastPay~\cite{fastpay}. Our contribution is
+strengthening FastPay's liveness guarantee to also cover healing clients after recovery.
 
-\begin{property}[Safety]
+\begin{property}[Safety -- Conservation of Value (S1)]
 \label{prop:safety}
 For every balance transition induced by a confirmed transfer,
 $\mathsf{Total}(\mathsf{bal}) = \sum_a \mathsf{bal}(a)$ is invariant: the protocol
 never creates or destroys value.
 \end{property}
 
-\begin{property}[Authenticity]
+\begin{property}[Authenticity (S2)]
 \label{prop:authenticity}
 Only the owner of an account may transfer value out of the account.
 \end{property}
 
 \begin{property}[Liveness]
 \label{prop:liveness}
-An honest client or a healed client can always transfer funds from its account.
+After GST, an honest client, and a healing client after it has healed, can always
+transfer funds by obtaining an $(n-f)$ finality certificate for any valid payment,
+possibly after recovery if the account is locked.
 \end{property}

@@ -246,23 +246,13 @@ When a validator receives a vote (Algorithm~\ref{alg:validator-recovery-vote}, \
 the signature (line~\ref{line:verify-vote}), stores the vote, and calls \textsc{ProcessCertificate}
 (line~\ref{line:call-process-cert}). The \textsc{ProcessCertificate} procedure extracts the transaction with
 maximum quorum support (line~\ref{line:extract-quorum}). If $n-f$ votes have been collected but no transaction
-has reached the notarisation quorum of $n-3f$ (line~\ref{line:check-no-majority}), the validator signs $\bot$
-(line~\ref{line:sign-bot}), signaling that no transaction can be finalized at this nonce. If notarisation
+has reached the notarization quorum of $n-3f$ (line~\ref{line:check-no-majority}), the validator signs $\bot$
+(line~\ref{line:sign-bot}), signaling that no transaction can be finalized at this nonce. If notarization
 quorum is reached and the account is pending (line~\ref{line:advance-nonce-pending}), the validator advances
 the nonce. When finality quorum of $n-f$ votes is reached (line~\ref{line:check-finality}), the validator
 finalizes the transaction and updates the finalised counter (line~\ref{line:update-finalised}). For recovery
 transactions, \textsc{GetTxChainStart} (line~\ref{line:get-tx-chain}) follows the chain back to the original
 tip transaction that should be executed.
-
-\textbf{Client Protocol.}
-Algorithm~\ref{alg:client-recovery} presents the client-side logic. The \textsc{SendTransaction} procedure
-follows the standard FastPay flow: construct a transaction, broadcast it to collect $n-f$ votes, and broadcast
-the resulting certificate.
-
-The \textsc{InitiateRecovery} procedure is invoked when the client detects that its account is locked. The
-client queries a fullnode for the current nonce and a non-$\bot$ transaction to use as the tip. The client
-constructs a recovery transaction that references the tip, then follows the same vote collection and certificate
-broadcast process as normal transactions.
 
 \begin{algorithm}[ht]
 \caption{Validator with Recovery - Transaction Handling}\label{alg:validator-recovery-tx}
@@ -327,7 +317,7 @@ broadcast process as normal transactions.
     \Statex
     \If{$k = \mathsf{account}[a].\mathsf{nonce}$}
         \If{$q < n - 3f$ \textbf{and} $|\mathsf{votes}[a][k]| \geq n - f$ \textbf{and} not voted $\bot$} \label{line:check-no-majority}
-            \Comment{no notarisation quorum but have $n-f$ votes}
+            \Comment{no notarization quorum but have $n-f$ votes}
             \State $\mathsf{account}[a].\mathsf{pending} \gets \mathsf{true}$
             \State $\mathsf{vote}_\bot \gets \langle \mathsf{vote}, a, k, \bot \rangle_v$ \label{line:sign-bot}
             \State \Call{OnVote}{$\mathsf{vote}_\bot$}
@@ -360,8 +350,8 @@ broadcast process as normal transactions.
 \EndProcedure
 \Statex
 \Procedure{ExecuteTransfer}{$tx$}
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$
-    \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
+    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$ \label{line:balance-sub}
+    \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$ \label{line:balance-add}
 \EndProcedure
 \Statex
 \Procedure{GetTxChainStart}{$tx$} \label{line:get-tx-chain}
@@ -408,7 +398,7 @@ certificates, and selects the one with the highest nonce to use as the recovery 
 \State \textbf{state} $\mathsf{nonce}$: next transaction nonce
 \Statex
 \Procedure{SendTransaction}{$\mathsf{to}, \mathsf{amount}$}
-    \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \bot)$
+    \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \emptyset)$
     \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
     \State broadcast $(tx, \langle tx \rangle_{\mathsf{self}})$ to $\mathcal{V}$
     \State wait for $n - f$ valid votes \Comment{certificate formed by validators}

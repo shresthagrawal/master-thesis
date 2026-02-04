@@ -39,7 +39,7 @@ Algorithm~\ref{alg:validator} shows the simplified validator logic.
     \State \textbf{require} $C$ is a valid $(n-f)$-quorum on $tx$
     \State \textbf{require} $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} = tx.\mathsf{nonce}$
     \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{pending} \gets \mathsf{false}$
-    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} \gets \mathsf{nonce} + 1$
+    \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{nonce} \gets tx.\mathsf{nonce} + 1$
     \State $\mathsf{account}[tx.\mathsf{sender}].\mathsf{balance} \mathrel{-}= tx.\mathsf{amount}$
     \State $\mathsf{account}[tx.\mathsf{recipient}].\mathsf{balance} \mathrel{+}= tx.\mathsf{amount}$
 \EndProcedure
@@ -56,7 +56,7 @@ Algorithm~\ref{alg:client} shows the simplified client logic.
 \State \textbf{state} $\mathsf{nonce}$: local transaction sequence number
 \Statex
 \Procedure{SendTransaction}{$\mathsf{to}, \mathsf{amount}$}
-    \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \bot)$
+    \State $tx \gets (\mathsf{self}, \mathsf{to}, \mathsf{amount}, \mathsf{nonce}, \emptyset)$
     \State $\mathsf{nonce} \gets \mathsf{nonce} + 1$
     \State broadcast $(tx, \langle tx \rangle_{\mathsf{self}})$ to $\mathcal{V}$
     \State wait for $n - f$ valid votes \Comment{certificate formed by validators}

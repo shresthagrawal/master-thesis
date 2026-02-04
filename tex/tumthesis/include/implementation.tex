@@ -95,7 +95,7 @@ processing votes, validators check for duplicates to prevent double-counting. Fo
 a validator accepts at most one vote per validator per nonce. For $\bot$ votes, the validator
 may receive both a normal vote and a $\bot$ vote from the same validator (if the validator
 initially voted for a transaction but later signed $\bot$ when no transaction achieved
-notarisation quorum).
+notarization quorum).
 
 \textbf{Network Communication.}
 Communication between components uses JSON-RPC over HTTP. The prototype implements three RPC
@@ -128,7 +128,7 @@ in the data field and broadcasts it to collect votes as usual.
 
 We evaluate the prototype using a local test network with configurable parameters. The default
 configuration uses $n = 6$ validators with $f = 1$ Byzantine fault tolerance, giving a finality
-quorum of $n - f = 5$ and a notarisation quorum of $n - 3f = 3$.
+quorum of $n - f = 5$ and a notarization quorum of $n - 3f = 3$.
 
 \textbf{Test Scenarios.}
 The test suite validates the protocol through a sequence of scenarios:
@@ -148,7 +148,7 @@ The test suite validates the protocol through a sequence of scenarios:
 
     \item \textbf{Recovery}: The client queries validators for recovery information, constructs
         a recovery transaction pointing to one of the conflicting transactions (which has
-        notarisation quorum), and successfully recovers the account.
+        notarization quorum), and successfully recovers the account.
 \end{enumerate}
 
 \textbf{Configuration Parameters.}
