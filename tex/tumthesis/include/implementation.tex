@@ -90,9 +90,7 @@ variants: \emph{Classic FastPay}, which implements the original protocol without
 recovery, and \emph{FastPay with Recovery}, which includes the full recovery
 mechanism from Chapter~\ref{chap:protocol}.
 
-\subsection{Classic FastPay}
-
-The classic variant omits all recovery-related code: no bot voting, no
+The classic variant omits all recovery-related code: no $\bot$ voting, no
 notarisation quorum, and no recovery transactions. A validator checks only
 whether $n - f$ votes have been reached for a single transaction at the current
 nonce; conflicting transactions permanently lock the account.
@@ -106,38 +104,51 @@ Both share the same network infrastructure, cryptographic operations, and
 client-side logic; the only difference is the certificate processing and the
 resulting finality quorum ($n - f$).
 
-\subsection{Benchmark Methodology}
+\textbf{Benchmarking approach.}
+Properly benchmarking distributed systems requires care. Throughput and latency
+are not independent: as load increases, systems exhibit an ``L-curve'' where
+latency remains stable until saturation, then spikes dramatically while
+throughput plateaus~\cite{paradigm-benchmarking}. Measuring only peak throughput
+or only low-load latency misses this critical operating region. We therefore
+measure both metrics across increasing offered load to capture the full curve.
 
-We measure \emph{throughput} (finalised transactions per second) and
-\emph{latency} (time from broadcasting a transaction to receiving $n - f$
-votes). All benchmarks use $n = 12$ validators running as separate processes on
-the same machine, communicating via HTTP JSON-RPC, giving $f = 3$ (quorum~9)
+Our goal is to confirm that the recovery mechanism adds no overhead to the
+optimistic (non-equivocating) path. Since the two protocols operate under
+different fault models ($3f+1$ vs $5f+1$), they have different quorum sizes for
+the same~$n$; we verify that this difference does not significantly affect
+performance. We also want to understand how the protocols behave under two
+workload patterns: independent transactions from different accounts (which can
+be processed in parallel) and sequential transactions from a single account
+(which must be processed in nonce order). Finally, we measure how quickly the
+system recovers from equivocation and returns to steady-state throughput.
+
+\textbf{Setup.}
+All benchmarks use $n = 12$ validators running as separate processes on
+the same machine, communicating via HTTP JSON-RPC. This gives $f = 3$ (quorum~9)
 for Classic and $f = 2$ (quorum~10) for Recovery. Transaction signatures are
-precomputed so that measurements capture only protocol execution.
+precomputed so that measurements capture only protocol execution. We measure
+\emph{throughput} (finalised transactions per second) and \emph{latency} (time
+from broadcasting a transaction to receiving $n - f$ votes).
 
-\textbf{Benchmark~1: Multi-account throughput and latency.}
+\textbf{Benchmark~1: Multi-account throughput.}
 Each transaction uses a separate account, removing the sequential nonce
 dependency. Offered load increases across phases (10, 20, 40, 80, 120,
 160~tx/s), each running for 10~seconds. This measures the system's
-aggregate throughput capacity. We expect both protocols to saturate at a
-similar point, confirming that the recovery mechanism does not add overhead
-to the happy path.
+aggregate throughput capacity and produces the L-curve for independent
+transactions.
 
-\textbf{Benchmark~2: Single-account sequential throughput.}
-A single account sends transactions sequentially -- each waits for quorum and
-vote submission before the next is sent. Offered load increases across the
-same phases with rate limiting. This is the same setup as Benchmark~1 but
-restricted to a single account, isolating the per-account throughput ceiling
-imposed by nonce ordering. We again expect both protocols to saturate at a
-similar point. The saturation throughput becomes the operating throughput
-for Benchmark~3.
+\textbf{Benchmark~2: Single-account throughput.}
+A single account sends transactions sequentially -- each waits for quorum
+before the next is sent. Offered load increases across the same phases with
+rate limiting. This isolates the per-account throughput ceiling imposed by
+nonce ordering.
 
-\textbf{Benchmark~3: Recovery impact on throughput.}
+\textbf{Benchmark~3: Recovery latency.}
 A single account transacts at the operating throughput identified in
 Benchmark~2. After 10~seconds of steady-state operation, the client
 equivocates, locking the account, then immediately recovers and resumes.
-We expect throughput to dip only during the equivocation second and return
-to normal immediately after.
+This measures how quickly the system returns to normal operation after
+equivocation.
 
 \subsection{Results}
 
@@ -263,12 +274,20 @@ dips only in the equivocation second and returns immediately.}
 
 These benchmarks measure a Node.js prototype, not a production system. The
 original FastPay paper reports over 80,000~tx/s with 20 authorities using a
-Rust implementation with native cryptographic libraries~\cite{fastpay}; our
-prototype reaches roughly 40~tx/s with 12 validators -- three orders of magnitude lower. The
-main bottleneck is the ethers.js signing library, which performs elliptic-curve
-operations in JavaScript rather than through native bindings, adding several
-milliseconds per signature. Additionally, all validators run on a single
-machine communicating over localhost, so the measurements do not capture network
-latency, bandwidth constraints, or geographic distribution effects that would
-be present in a real deployment. A production-grade implementation and
-realistic benchmarking setup are left to future work.
+Rust implementation with native cryptographic libraries and sharding across
+multiple cores~\cite{fastpay}; our prototype reaches roughly 40~tx/s with 12
+validators -- three orders of magnitude lower. We omit sharding to keep the
+implementation simple and focus on protocol correctness.
+
+The main bottleneck is the ethers.js library, which uses noble-secp256k1 for
+elliptic-curve operations. This pure JavaScript implementation achieves
+roughly 800 signature verifications per second (${\sim}1$\,ms per
+operation)~\cite{noble-secp256k1}, compared to ${\sim}35$\,\textmu s per
+operation for native Rust bindings to libsecp256k1~\cite{fastcrypto-benchmarks}
+-- nearly 30$\times$ faster.
+JSON-RPC serialization adds further overhead. Additionally, all validators
+run on a single machine communicating over localhost, so the measurements do
+not capture network latency, bandwidth constraints, or geographic distribution
+effects present in real deployments. A production-grade Rust implementation
+with native cryptography and realistic benchmarking setup are left to future
+work.

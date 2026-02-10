@@ -115,12 +115,7 @@ More generally, many safe fast-path operations are commutative: executing them i
 \[
 +\$5 \text{ and } +\$7 \text{ commute, so their order does not matter.}
 \]
-Conflict-Free Replicated Data Types (CRDTs)~\cite{crdts} formalize this property:
-they are data structures whose operations commute by design, so concurrent updates
-from different replicas always converge to the same state without coordination.
-CRDTs are widely used in collaborative editing (e.g., Google Docs, Figma) and
-distributed databases (e.g., Riak, Redis) where low-latency updates across replicas
-matter more than strict ordering.
+CRDTs (Section~\ref{chap:introduction}) formalize this property.
 
 The main non-commutative edge case arises from overspending. Subtractions are not commutative in the presence of an underflow constraint (e.g., balances must remain non-negative). Whether a withdrawal is valid depends on the ordering of that account's outgoing payments.
 

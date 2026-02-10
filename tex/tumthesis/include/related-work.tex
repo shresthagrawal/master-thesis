@@ -1,6 +1,8 @@
 \chapter{Related Work}
 \label{chap:related-work}
 
+This chapter surveys the work most relevant to our recovery protocol. We begin with BFT consensus protocols to understand their trade-offs, starting with state-of-the-art protocols in the optimal $3f+1$ model. We then examine protocols in the $5f+1$ model, as our construction operates under this threshold and a comparison with consensus protocols in the same model provides a fairer baseline. We then turn to consensusless protocols, which form the foundation of our work, and examine how existing systems handle accounts locked due to equivocation. Finally, we discuss view-change mechanisms in consensus protocols, as they closely relate to the recovery problem.
+
 \section{Byzantine Consensus Protocols}
 \label{sec:rw-bft-consensus}
 
