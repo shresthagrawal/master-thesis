@@ -45,7 +45,7 @@ We assume a Byzantine adversary controlling up to $f$ validators. We write:
 
 Honest parties follow the protocol as specified. Byzantine parties may deviate arbitrarily (including equivocation, selective message dropping, or sending conflicting messages).
 
-We distinguish two client behaviors: \emph{honest clients} follow the protocol, while \emph{Byzantine clients} may deviate arbitrarily. Under relaxed termination (Section~\ref{sec:termination-tradeoff}), Byzantine clients that introduce conflicts are not guaranteed liveness-the protocol may halt progress for that client's state. Safety is preserved unconditionally, but liveness is sacrificed in the presence of conflicts.
+Similarly, we distinguish two client behaviors: \emph{honest clients} follow the protocol, while \emph{Byzantine clients} may deviate arbitrarily. Under relaxed termination (Section~\ref{sec:termination-tradeoff}), Byzantine clients that introduce conflicts are not guaranteed liveness-the protocol may halt progress for that client's state. Safety is preserved unconditionally, but liveness is sacrificed in the presence of conflicts.
 
 We assume static corruption: the adversary chooses which parties to corrupt at the beginning of execution and can coordinate all corrupted parties.
 
@@ -82,7 +82,7 @@ signed by the sender. Intuitively:
 In account-based blockchains, if \textsf{data} is empty, the transaction is treated as a simple transfer; otherwise, it invokes code at the recipient address. In this thesis we focus on FastPay-style payments, and therefore assume $\textsf{data} = \emptyset$ in the concrete construction (Chapter~\ref{chap:protocol}). A \emph{payment transaction} is thus a transaction of the form $tx = (\textsf{sender}, \textsf{recipient}, \textsf{amount}, \textsf{nonce})$, transferring \textsf{amount} from the sender's account to the recipient's account. Later, we discuss how the recovery intuition extends to other consensusless protocols, including those with single-writer contract-like state.
 
 \textbf{Precompiled contracts.}
-In Ethereum and compatible blockchains, \emph{precompiled contracts} (or \emph{precompiles}) are special addresses
+In Ethereum and compatible blockchains, \emph{precompile contracts} (or \emph{precompiles}) are special addresses
 that provide native functionality implemented directly in the node software rather than as EVM bytecode. Examples
 include cryptographic operations like ECDSA recovery and hash functions. From the client's perspective, interacting
 with a precompile looks identical to calling a regular smart contract: the client sends a transaction to the
@@ -125,7 +125,7 @@ Payments can avoid consensus because validity checks for spending can be made lo
 \textbf{Why consensusless protocols are fast.}
 Avoiding consensus eliminates multiple rounds of validator-to-validator coordination. FastPay~\cite{fastpay} reports intra-continental confirmation latency below 100ms and throughput above 80,000 transactions per second with 20 authorities in controlled experiments.
 
-For comparison, consensus protocols -- even highly optimized modern ones -- require multiple message rounds to commit. For example, HotStuff-style protocols~\cite{hotstuff} commit through multiple phases (often described as three round trips in the baseline design). Recent DAG-based consensus protocols reduce latency and can reach very high throughput, but they still solve a global ordering problem and therefore incur additional coordination; Mysticeti-C~\cite{mysticeti} reports WAN commit latency around 0.5s while sustaining over 200k TPS.
+For comparison, consensus protocols -- even highly optimized modern ones -- require multiple message rounds to commit. For example, HotStuff-style protocols~\cite{hotstuff} commit through multiple phases (often described as three round trips in the baseline design). Recent DAG-based consensus protocols reduce latency and can reach very high throughput, but they still solve a global ordering problem and therefore incur additional coordination.
 
 Consensusless protocols also enable horizontal scalability because execution can be sharded by object/account: disjoint state can be processed in parallel across machines, a property emphasized in FastPay's design.
 
