@@ -1,7 +1,7 @@
 \chapter{Security Analysis}
 \label{chap:security-analysis}
 
-We state safety as a \emph{per-account common prefix} property: for each sender account $a$, validators maintain a local view of a chain of finalized actions indexed by the sender's nonce. Safety means that honest validators never disagree about this per-account chain.
+In this chapter, we prove that our protocol satisfies the security properties defined in Section~\ref{sec:security-properties}: conservation of value (S1), authenticity (S2), and liveness. We begin with safety, which we formalize as a \emph{per-account common prefix} property -- honest validators never disagree on the chain of finalized actions for any account. We first prove this for the base FastPay protocol and then show that recovery preserves it, using the $5f+1$ fault model to rule out conflicting certificates. From common prefix we derive conservation of value and authenticity. We then turn to liveness, showing that non-conflicting transactions finalize within a single round trip, that stuck nonces always resolve via Simplex-style $\bot$-voting, and that healing clients can construct recovery transactions to unlock progress.
 
 \section{Per-Account Finalized Chain}
 

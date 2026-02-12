@@ -4,6 +4,8 @@
 \section{The Termination Tradeoff}
 \label{sec:termination-tradeoff}
 
+This appendix formalizes the core semantic tradeoff underlying consensusless protocols: replacing the unconditional termination guarantee of classical Byzantine consensus with a weaker, conflict-conditioned variant. We first recall the standard definition of single-shot consensus and then present the relaxed formulation adopted by protocols such as ABC~\cite{abc} and FastPay~\cite{fastpay}, highlighting how this relaxation enables the performance gains discussed throughout the thesis while preserving safety unconditionally.
+
 We start from the classical definition of single-shot consensus.
 
 \textbf{Single-shot consensus.}

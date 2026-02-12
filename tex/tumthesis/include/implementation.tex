@@ -2,7 +2,7 @@
 \label{chap:implementation}
 
 We implement a prototype of the recovery protocol in TypeScript on Node.js
-to validate the design and serve as a reference implementation.\footnote{Source code available at \url{https://github.com/shresthagrawal/master-thesis.git}}
+to validate the design and serve as a reference implementation. The source code is available at \url{https://github.com/shresthagrawal/master-thesis.git}.
 
 \section{System Architecture}
 \label{sec:system-architecture}
@@ -44,11 +44,11 @@ interacting with validators through JSON-RPC.}
 
 \textbf{Validators.} Each validator runs as an independent HTTP server exposing
 a JSON-RPC endpoint, maintaining account state (balances, nonces, pending flags)
-and collected votes. On receiving a transaction, a validator checks validity,
+and collected votes (\texttt{src/validator.ts}, \texttt{src/validator-core.ts}). On receiving a transaction, a validator checks validity,
 signs a vote, and broadcasts it to all other validators.
 
 \textbf{Clients.} Clients broadcast transactions to all validators in parallel
-and collect vote responses. For recovery, clients query validators for the
+and collect vote responses (\texttt{src/client.ts}). For recovery, clients query validators for the
 current account state and construct a recovery transaction referencing the
 appropriate tip.
 
